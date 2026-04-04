@@ -1,0 +1,20 @@
+[Unit]
+Description=GymClaw Frontend (Next.js)
+After=network.target ai-backend.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/ai-assistant/frontend
+Environment="NODE_ENV=production"
+Environment="PORT=3000"
+Environment="NEXT_PUBLIC_BACKEND_URL="
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/ai-assistant/logs/frontend.log
+StandardError=append:/opt/ai-assistant/logs/frontend.log
+
+[Install]
+WantedBy=multi-user.target

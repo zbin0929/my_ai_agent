@@ -1,0 +1,53 @@
+# 全局设置
+global:
+  llm:                     # 大语言模型配置
+    provider: "zhipu"      # 固定为智谱
+    model: "glm-4-flash"   # 可选：glm-4-flash, glm-4-plus 等
+    base_url: "https://open.bigmodel.cn/api/paas/v4/"
+    temperature: 0.7       # 0~1，越高回答越随机
+  enable_zhipu_search: true   # 是否启用联网搜索（智谱原生）
+  zhipu_search_engine: "search_std"   # 搜索引擎类型
+
+# Agent 定义列表
+agents:
+  - name: "researcher"          # 唯一标识，供任务引用
+    role: "研究员"               # 角色名称，显示用
+    goal: "搜索并总结关于 {topic} 的最新信息"   # 目标，{topic} 会被替换
+    backstory: "你擅长使用搜索引擎查找最新资料，并提炼要点。"   # 背景故事，影响行为
+    tools: []                    # 分配的工具，如 ["file_writer"]
+    verbose: true                # 是否输出详细日志
+
+  # 其他 Agent 结构相同
+  - name: "writer"
+    role: "报告撰写员"
+    goal: "根据资料写出简洁的报告"
+    backstory: "你擅长把复杂内容变成易读的文字"
+    tools: []
+    verbose: true
+
+  - name: "executor"
+    role: "执行员"
+    goal: "将最终报告保存到本地文件"
+    backstory: "你负责把报告写入文件，确保内容完整。"
+    tools: ["file_writer"]
+    verbose: true
+
+# 任务流程定义（顺序执行）
+tasks:
+  - name: "research"                         # 任务唯一标识
+    description: "搜索关于 {topic} 的最新信息，总结出3个要点"   # 任务描述
+    agent: "researcher"                      # 执行该任务的 Agent 名称
+    expected_output: "3个要点的简短描述"      # 期望输出格式
+    context: []                              # 依赖的任务列表（空表示无依赖）
+
+  - name: "write"
+    description: "根据研究员的发现，写一段200字左右的总结报告"
+    agent: "writer"
+    expected_output: "200字的报告"
+    context: ["research"]                    # 依赖 research 任务完成
+
+  - name: "save"
+    description: "将最终报告保存到文件 'report.txt' 中"
+    agent: "executor"
+    expected_output: "确认保存成功的信息"
+    context: ["write"]                       # 依赖 write 任务完成

@@ -1,0 +1,178 @@
+[
+  {
+    "id": "glm-4-flash-250414",
+    "name": "GLM-4-Flash-250414",
+    "provider": "zhipu",
+    "model_id": "glm-4-flash-250414",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "description": "智谱 AI 语言模型，128K 上下文，通用任务表现优秀",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "glm-4-7-flash",
+    "name": "GLM-4.7-Flash",
+    "provider": "zhipu",
+    "model_id": "glm-4-7-flash",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "description": "智谱 AI 模型，30B/3B MoE，200K 上下文，通用能力同级别最优",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "glm-4-air-250414",
+    "name": "GLM-4-Air-250414",
+    "provider": "zhipu",
+    "model_id": "glm-4-air-250414",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "description": "智谱 AI 高性价比模型，128K 上下文，性能比肩 GPT-4o",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "glm-z1-flash",
+    "name": "GLM-Z1-Flash",
+    "provider": "zhipu",
+    "model_id": "glm-z1-flash",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "description": "智谱 AI 推理模型，128K 上下文，深度思考",
+    "supports_thinking": true,
+    "capabilities": [],
+    "builtin": true
+  },
+  {
+    "id": "glm-z1-air",
+    "name": "GLM-Z1-Air",
+    "provider": "zhipu",
+    "model_id": "glm-z1-air",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "description": "智谱 AI 高性价比推理模型，128K 上下文，深度思考",
+    "supports_thinking": true,
+    "capabilities": [],
+    "builtin": true
+  },
+  {
+    "id": "glm-4v-flash",
+    "name": "GLM-4V-Flash",
+    "provider": "zhipu",
+    "model_id": "glm-4v-flash",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "description": "智谱 AI 图片理解模型",
+    "supports_thinking": false,
+    "capabilities": ["vision"],
+    "builtin": true
+  },
+  {
+    "id": "cogview-4",
+    "name": "CogView-4",
+    "provider": "zhipu",
+    "model_id": "cogview-4-250304",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "description": "智谱 AI 图片生成模型",
+    "supports_thinking": false,
+    "capabilities": [],
+    "builtin": true
+  },
+  {
+    "id": "deepseek-chat",
+    "name": "DeepSeek Chat",
+    "provider": "deepseek",
+    "model_id": "deepseek-chat",
+    "base_url": "https://api.deepseek.com/v1",
+    "description": "DeepSeek 对话模型，高性价比",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "deepseek-reasoner",
+    "name": "DeepSeek-R1",
+    "provider": "deepseek",
+    "model_id": "deepseek-reasoner",
+    "base_url": "https://api.deepseek.com/v1",
+    "description": "DeepSeek 推理模型，深度思考，接近 o1 水平",
+    "supports_thinking": true,
+    "capabilities": [],
+    "builtin": true
+  },
+  {
+    "id": "qwq-32b",
+    "name": "QwQ-32B",
+    "provider": "dashscope",
+    "model_id": "qwq-32b",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "description": "通义千问推理模型，32B 参数，深度思考",
+    "supports_thinking": true,
+    "capabilities": [],
+    "builtin": true
+  },
+  {
+    "id": "qwen-turbo",
+    "name": "Qwen-Turbo",
+    "provider": "dashscope",
+    "model_id": "qwen-turbo",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "description": "通义千问快速模型",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "qwen-plus",
+    "name": "Qwen-Plus",
+    "provider": "dashscope",
+    "model_id": "qwen-plus",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "description": "通义千问增强模型",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "kimi-k2.5",
+    "name": "Kimi K2.5",
+    "provider": "moonshot",
+    "model_id": "kimi-k2.5",
+    "base_url": "https://api.moonshot.cn/v1",
+    "description": "Moonshot AI 最新推理模型，128K 上下文",
+    "supports_thinking": true,
+    "capabilities": [],
+    "builtin": true
+  },
+  {
+    "id": "moonshot-v1-8k",
+    "name": "Moonshot V1",
+    "provider": "moonshot",
+    "model_id": "moonshot-v1-8k",
+    "base_url": "https://api.moonshot.cn/v1",
+    "description": "Moonshot AI 对话模型，8K 上下文",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "gpt-4o",
+    "name": "GPT-4o",
+    "provider": "openai",
+    "model_id": "gpt-4o",
+    "base_url": "https://api.openai.com/v1",
+    "description": "OpenAI 旗舰模型",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  },
+  {
+    "id": "gpt-4o-mini",
+    "name": "GPT-4o Mini",
+    "provider": "openai",
+    "model_id": "gpt-4o-mini",
+    "base_url": "https://api.openai.com/v1",
+    "description": "OpenAI 轻量模型，性价比高",
+    "supports_thinking": false,
+    "capabilities": ["tool_use"],
+    "builtin": true
+  }
+]

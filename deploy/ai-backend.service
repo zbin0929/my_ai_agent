@@ -1,0 +1,19 @@
+[Unit]
+Description=GymClaw Backend (FastAPI + Uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/ai-assistant
+Environment="PATH=/opt/ai-assistant/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/opt/ai-assistant/.env
+ExecStart=/opt/ai-assistant/venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --log-level info --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/ai-assistant/logs/backend.log
+StandardError=append:/opt/ai-assistant/logs/backend.log
+
+[Install]
+WantedBy=multi-user.target

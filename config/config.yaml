@@ -1,0 +1,460 @@
+system:
+  name: 多Agent智能体系统
+  version: 1.0.0
+  log_level: INFO
+  log_dir: /logs
+  data_dir: /data
+llm_providers:
+- id: zhipu
+  name: 智谱AI
+  description: 智谱清言系列模型，支持原生联网搜索
+  type: zhipu
+  base_url: https://open.bigmodel.cn/api/paas/v4/
+  api_key: ''
+  env_key: ZHIPU_API_KEY
+  models:
+  - id: glm-4-flash
+    name: GLM-4-Flash
+    description: 高速模型，适合简单任务
+    max_tokens: 4096
+    pricing:
+      input: 0.0001
+      output: 0.0001
+  - id: glm-4-plus
+    name: GLM-4-Plus
+    description: 增强模型，适合复杂推理
+    max_tokens: 128000
+    pricing:
+      input: 0.05
+      output: 0.05
+  - id: glm-4-air
+    name: GLM-4-Air
+    description: 均衡模型，性价比高
+    max_tokens: 8192
+    pricing:
+      input: 0.001
+      output: 0.001
+  - id: glm-z1-air
+    name: GLM-Z1-Air
+    description: 推理模型，深度思考
+    max_tokens: 128000
+    pricing:
+      input: 0.0
+      output: 0.0
+  supports_search: true
+- id: openai
+  name: OpenAI
+  description: GPT 系列模型
+  type: openai
+  base_url: https://api.openai.com/v1
+  api_key: ''
+  env_key: OPENAI_API_KEY
+  models:
+  - id: gpt-4o
+    name: GPT-4o
+    description: 最新旗舰模型
+    max_tokens: 128000
+    pricing:
+      input: 0.005
+      output: 0.015
+  - id: gpt-4o-mini
+    name: GPT-4o Mini
+    description: 轻量级模型
+    max_tokens: 128000
+    pricing:
+      input: 0.00015
+      output: 0.0006
+  supports_search: false
+- id: deepseek
+  name: DeepSeek
+  description: 深度求索，高性价比
+  type: openai_compatible
+  base_url: https://api.deepseek.com/v1
+  api_key: ''
+  env_key: DEEPSEEK_API_KEY
+  models:
+  - id: deepseek-chat
+    name: DeepSeek Chat
+    description: 通用对话模型
+    max_tokens: 64000
+    pricing:
+      input: 0.001
+      output: 0.002
+  - id: deepseek-reasoner
+    name: DeepSeek Reasoner
+    description: 深度推理模型
+    max_tokens: 64000
+    pricing:
+      input: 0.001
+      output: 0.002
+  supports_search: false
+- id: dashscope
+  name: 阿里云百炼
+  description: 通义千问系列模型
+  type: openai_compatible
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key: ''
+  env_key: DASHSCOPE_API_KEY
+  models:
+  - id: qwen-turbo
+    name: 通义千问 Turbo
+    description: 快速响应模型
+    max_tokens: 8192
+  - id: qwen-plus
+    name: 通义千问 Plus
+    description: 增强版模型
+    max_tokens: 32768
+  - id: qwen-max
+    name: 通义千问 Max
+    description: 旗舰版模型
+    max_tokens: 32768
+  - id: qwq-32b
+    name: QwQ-32B
+    description: 推理模型，深度思考
+    max_tokens: 32768
+  supports_search: false
+- id: moonshot
+  name: Moonshot AI
+  description: Kimi 系列模型，超长上下文
+  type: openai_compatible
+  base_url: https://api.moonshot.cn/v1
+  api_key: ''
+  env_key: MOONSHOT_API_KEY
+  models:
+  - id: moonshot-v1-8k
+    name: Moonshot V1
+    description: 8K 上下文对话模型
+    max_tokens: 8192
+  - id: kimi-k2.5
+    name: Kimi K2.5
+    description: 最新推理模型，128K 上下文
+    max_tokens: 131072
+  supports_search: false
+default_llm:
+  provider: zhipu
+  model: glm-4-flash
+  temperature: 0.7
+search:
+  provider: zhipu_search
+  api_key: 158ea7ff5be34cc18b16346bd3f8de6d.tk69cfHe9bHxhRL6
+tools_registry:
+- id: web_search
+  name: 网络搜索
+  type: builtin
+  description: 使用搜索引擎搜索网络信息（需 LLM 支持）
+  icon: 🔍
+  config_schema:
+    type: object
+    properties:
+      engine:
+        type: string
+        title: 搜索引擎
+        enum:
+        - search_std
+        - search_pro
+        - search_pro_sogou
+        - search_pro_quark
+        default: search_std
+        description: 选择搜索引擎类型
+      count:
+        type: integer
+        title: 结果数量
+        default: 5
+        minimum: 1
+        maximum: 10
+- id: file_reader
+  name: 文件读取
+  type: builtin
+  description: 读取本地文件内容
+  icon: 📖
+  config_schema:
+    type: object
+    properties:
+      encoding:
+        type: string
+        default: utf-8
+- id: file_writer
+  name: 文件写入
+  type: builtin
+  description: 将内容写入本地文件
+  icon: 📝
+  config_schema:
+    type: object
+    properties:
+      encoding:
+        type: string
+        default: utf-8
+- id: feishu_bot
+  name: 飞书机器人
+  type: plugin
+  description: 发送消息到飞书群聊
+  icon: 📤
+  plugin_class: FeishuBotTool
+  config_schema:
+    type: object
+    properties:
+      webhook_url:
+        type: string
+        title: Webhook 地址
+        description: 飞书群机器人的 Webhook URL
+        required: true
+        secret: true
+      secret:
+        type: string
+        title: 加签密钥
+        description: 可选，用于签名验证
+        secret: true
+- id: wecom_bot
+  name: 企微机器人
+  type: plugin
+  description: 发送消息到企业微信群聊
+  icon: 📤
+  plugin_class: WecomBotTool
+  config_schema:
+    type: object
+    properties:
+      webhook_url:
+        type: string
+        title: Webhook 地址
+        required: true
+        secret: true
+- id: dingtalk_bot
+  name: 钉钉机器人
+  type: plugin
+  description: 发送消息到钉钉群聊
+  icon: 📤
+  plugin_class: DingtalkBotTool
+  config_schema:
+    type: object
+    properties:
+      webhook_url:
+        type: string
+        title: Webhook 地址
+        required: true
+        secret: true
+      secret:
+        type: string
+        title: 加签密钥
+        description: 可选，用于签名验证
+        secret: true
+- id: browser
+  name: 浏览器控制
+  type: plugin
+  description: 自动化操作浏览器，支持网页抓取和交互
+  icon: 🌐
+  plugin_class: BrowserTool
+  config_schema:
+    type: object
+    properties:
+      headless:
+        type: boolean
+        title: 无头模式
+        default: true
+        description: 是否隐藏浏览器窗口
+      timeout:
+        type: integer
+        title: 超时时间（秒）
+        default: 30
+        minimum: 5
+        maximum: 300
+- id: code_executor
+  name: 代码执行
+  type: plugin
+  description: 在安全沙盒中执行代码
+  icon: 💻
+  plugin_class: CodeExecutorTool
+  config_schema:
+    type: object
+    properties:
+      timeout:
+        type: integer
+        title: 执行超时（秒）
+        default: 60
+      allowed_languages:
+        type: array
+        title: 允许的语言
+        items:
+          type: string
+          enum:
+          - python
+          - javascript
+          - bash
+        default:
+        - python
+agent_templates:
+- id: researcher
+  name: 研究员
+  description: 擅长搜索和收集信息，适合调研类任务
+  icon: 🔬
+  default_config:
+    role: 研究员
+    goal: 搜索并总结关于 {topic} 的最新信息
+    backstory: 你擅长使用搜索引擎查找最新资料，并提炼要点。你总是从多个来源验证信息的准确性。
+    suggested_tools:
+    - web_search
+    suggested_llm:
+      provider: zhipu
+      model: glm-4-flash
+- id: writer
+  name: 报告撰写员
+  description: 擅长整理资料成报告，适合内容创作
+  icon: ✍️
+  default_config:
+    role: 报告撰写员
+    goal: 根据资料写出结构清晰、内容丰富的报告
+    backstory: 你擅长把复杂内容变成易读的文字。你的报告总是逻辑清晰、层次分明。
+    suggested_tools:
+    - file_reader
+    suggested_llm:
+      provider: zhipu
+      model: glm-4-flash
+- id: executor
+  name: 执行员
+  description: 负责执行具体操作，如文件写入、消息发送
+  icon: ⚙️
+  default_config:
+    role: 执行员
+    goal: 准确执行分配的任务
+    backstory: 你是一个可靠的执行者，总是按时完成任务。
+    suggested_tools:
+    - file_writer
+- id: messenger
+  name: 消息发送员
+  description: 负责推送消息到各平台
+  icon: 📨
+  default_config:
+    role: 消息发送员
+    goal: 将信息准确推送到指定平台
+    backstory: 你负责把消息准确、及时地发送到目标平台。
+    suggested_tools:
+    - feishu_bot
+    - wecom_bot
+    - dingtalk_bot
+- id: analyst
+  name: 数据分析师
+  description: 擅长数据分析和可视化
+  icon: 📊
+  default_config:
+    role: 数据分析师
+    goal: 分析数据并提供洞察
+    backstory: 你擅长从数据中发现规律和趋势，并用清晰的方式呈现分析结果。
+    suggested_tools:
+    - code_executor
+agents:
+- id: market_researcher
+  name: 市场研究员
+  enabled: true
+  template: researcher
+  role: 市场研究员
+  goal: 深入研究 {topic} 的市场现状、竞争格局和发展趋势
+  backstory: '你是一名资深市场分析师，拥有10年行业研究经验。
+
+    你擅长从海量信息中提取关键洞察，你的分析报告被多家 Fortune 500 公司采用。
+
+    '
+  llm:
+    provider: zhipu
+    model: glm-4-flash
+    temperature: 0.5
+  tools:
+  - id: web_search
+    config:
+      engine: search_pro
+      count: 5
+  verbose: true
+  max_iter: 15
+- id: tech_writer
+  name: 技术文档撰写员
+  enabled: true
+  template: writer
+  role: 技术文档撰写员
+  goal: 撰写关于 {topic} 的专业技术报告
+  backstory: '你是一名技术文档专家，擅长将复杂的技术概念转化为清晰的文档。
+
+    你的文档结构清晰、语言准确，深受技术团队喜爱。
+
+    '
+  llm:
+    provider: zhipu
+    model: glm-4-flash
+    temperature: 0.7
+  tools: []
+  verbose: true
+- id: file_executor
+  name: 文件执行员
+  enabled: true
+  template: executor
+  role: 文件执行员
+  goal: 将报告保存到指定文件
+  backstory: 你负责把报告写入文件，确保内容完整、格式正确。
+  llm:
+    provider: zhipu
+    model: glm-4-flash
+  tools:
+  - id: file_writer
+    config: {}
+  verbose: true
+- id: notification_sender
+  name: 消息推送员
+  enabled: false
+  template: messenger
+  role: 消息推送员
+  goal: 将报告摘要推送到飞书群
+  backstory: 你负责把消息准确发送到目标平台。
+  llm:
+    provider: zhipu
+    model: glm-4-flash
+  tools:
+  - id: feishu_bot
+    config:
+      webhook_url: ${FEISHU_WEBHOOK}
+      secret: ${FEISHU_SECRET}
+  verbose: true
+tasks:
+- id: research_task
+  name: 市场研究
+  description: 搜索关于 {topic} 的最新信息，总结出 {num_points} 个关键要点
+  agent: market_researcher
+  expected_output: '{num_points}个要点的结构化描述，每个要点包含标题和详细说明'
+  context: []
+  enabled: true
+  timeout: 300
+- id: write_task
+  name: 撰写报告
+  description: 根据研究结果，撰写一份约 {word_count} 字的专业报告，包含执行摘要、主要发现和建议
+  agent: tech_writer
+  expected_output: '{word_count}字左右的专业报告，格式规范，结构清晰'
+  context:
+  - research_task
+  enabled: true
+  timeout: 300
+- id: save_task
+  name: 保存报告
+  description: 将最终报告保存到文件 {output_file}
+  agent: file_executor
+  expected_output: 确认文件保存成功的信息
+  context:
+  - write_task
+  enabled: true
+  timeout: 60
+- id: notify_task
+  name: 发送通知
+  description: 将报告摘要发送到飞书群
+  agent: notification_sender
+  expected_output: 发送成功的确认信息
+  context:
+  - save_task
+  enabled: false
+  timeout: 60
+execution:
+  mode: sequential
+  max_retries: 3
+  global_timeout: 600
+  on_failure: stop
+  validate_before_run: true
+  save_history: true
+  history_path: /logs/history
+web:
+  frontend_port: 3000
+  backend_port: 8000
+  log_level: INFO
