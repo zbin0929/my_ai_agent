@@ -27,6 +27,9 @@ export function Sidebar() {
     addSession,
     removeSession,
     setMessages,
+    isStreaming,
+    resetStreaming,
+    setIsStreaming,
   } = useChatStore();
 
   const { t, lang, setLang } = useI18n();
@@ -100,7 +103,12 @@ export function Sidebar() {
   };
 
   const handleSelectSession = async (id: string) => {
+    if (isStreaming) {
+      resetStreaming();
+      setIsStreaming(false);
+    }
     setCurrentSession(id);
+    setMessages([]);
     try {
       const data = await api.sessions.getMessages(id);
       setMessages(

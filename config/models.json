@@ -14,10 +14,10 @@
     "id": "glm-4-7-flash",
     "name": "GLM-4.7-Flash",
     "provider": "zhipu",
-    "model_id": "glm-4-7-flash",
+    "model_id": "glm-4.7-flash",
     "base_url": "https://open.bigmodel.cn/api/paas/v4/",
-    "description": "智谱 AI 模型，30B/3B MoE，200K 上下文，通用能力同级别最优",
-    "supports_thinking": false,
+    "description": "智谱 AI 模型，30B/3B MoE，200K 上下文，支持思考模式切换",
+    "supports_thinking": true,
     "capabilities": ["tool_use"],
     "builtin": true
   },

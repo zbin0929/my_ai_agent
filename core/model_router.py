@@ -28,6 +28,10 @@ _LLM_CACHE: Dict[str, Tuple[Any, float]] = {}
 _LLM_CACHE_LOCK = threading.Lock()
 _LLM_CACHE_TTL = 300
 
+_MODELS_CACHE: Optional[Tuple[list, float]] = None
+_MODELS_CACHE_LOCK = threading.Lock()
+_MODELS_CACHE_TTL = 60
+
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
@@ -44,22 +48,33 @@ PROVIDER_BASE_URLS = {
 
 
 def _load_all_models() -> list:
-    models = []
-    sys_file = os.path.join(project_root, "config", "models.json")
-    if os.path.exists(sys_file):
-        try:
-            with open(sys_file, "r", encoding="utf-8") as f:
-                models.extend(json.load(f))
-        except Exception:
-            pass
-    custom_file = os.path.join(project_root, "data", "custom_models.json")
-    if os.path.exists(custom_file):
-        try:
-            with open(custom_file, "r", encoding="utf-8") as f:
-                models.extend(json.load(f))
-        except Exception:
-            pass
-    return models
+    global _MODELS_CACHE
+    if _MODELS_CACHE is not None:
+        cached_models, ts = _MODELS_CACHE
+        if time.time() - ts < _MODELS_CACHE_TTL:
+            return cached_models
+    with _MODELS_CACHE_LOCK:
+        if _MODELS_CACHE is not None:
+            cached_models, ts = _MODELS_CACHE
+            if time.time() - ts < _MODELS_CACHE_TTL:
+                return cached_models
+        models = []
+        sys_file = os.path.join(project_root, "config", "models.json")
+        if os.path.exists(sys_file):
+            try:
+                with open(sys_file, "r", encoding="utf-8") as f:
+                    models.extend(json.load(f))
+            except Exception:
+                pass
+        custom_file = os.path.join(project_root, "data", "custom_models.json")
+        if os.path.exists(custom_file):
+            try:
+                with open(custom_file, "r", encoding="utf-8") as f:
+                    models.extend(json.load(f))
+            except Exception:
+                pass
+        _MODELS_CACHE = (models, time.time())
+        return models
 
 
 def detect_required_capabilities(files: list = None) -> list:
@@ -85,6 +100,20 @@ def get_model_capabilities(model_id: str) -> list:
 def find_model_with_capabilities(required_caps: list) -> dict:
     candidates = [m for m in _load_all_models() if all(c in m.get("capabilities", []) for c in required_caps)]
     return candidates[0] if candidates else None
+
+
+def resolve_model_id(agent_model_id: str) -> str:
+    """根据 Agent 配置的 model_id 查找正确的 provider model_id
+    
+    优先从 config/models.json 查找匹配的模型定义，返回定义中的 model_id
+    如果找不到，则返回原始的 agent_model_id
+    """
+    for m in _load_all_models():
+        if m.get("id") == agent_model_id:
+            provider_model_id = m.get("model_id")
+            if provider_model_id:
+                return provider_model_id
+    return agent_model_id
 
 
 def _get_default_base_url(provider: str) -> str:
@@ -117,6 +146,22 @@ def _build_llm_cache_key(model_id: str, api_key: str, base_url: str, temperature
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
+_llm_factory_instance: Optional[Any] = None
+_llm_factory_lock = threading.Lock()
+
+
+def _get_llm_factory(config: Dict[str, Any]) -> Any:
+    global _llm_factory_instance
+    if _llm_factory_instance is not None:
+        return _llm_factory_instance
+    with _llm_factory_lock:
+        if _llm_factory_instance is not None:
+            return _llm_factory_instance
+        from core.llm_factory import LLMFactory
+        _llm_factory_instance = LLMFactory(config)
+        return _llm_factory_instance
+
+
 def build_llm_for_agent(agent_config):
     """根据 Agent 配置构建 LLM 实例（带缓存）
 
@@ -129,15 +174,17 @@ def build_llm_for_agent(agent_config):
     if agent_config.custom_api_key:
         base_url = agent_config.custom_base_url or _get_default_base_url(agent_config.model_provider)
         if base_url:
+            # 解析正确的模型 ID
+            actual_model_id = resolve_model_id(agent_config.model_id)
             cache_key = _build_llm_cache_key(
-                agent_config.model_id, agent_config.custom_api_key, base_url, agent_config.temperature
+                actual_model_id, agent_config.custom_api_key, base_url, agent_config.temperature
             )
             cached = _llm_cache_get(cache_key)
             if cached is not None:
                 return cached
             logger.info(f"Agent '{agent_config.name}' 使用独立 API Key，提供商: {agent_config.model_provider}")
             llm = LLM(
-                model=agent_config.model_id,
+                model=actual_model_id,
                 api_key=agent_config.custom_api_key,
                 base_url=base_url,
                 temperature=agent_config.temperature,
@@ -145,11 +192,10 @@ def build_llm_for_agent(agent_config):
             _llm_cache_put(cache_key, llm)
             return llm
 
-    from core.llm_factory import LLMFactory
     from core.config_loader import get_config
 
     config = get_config(os.path.join(project_root, "config"))
-    factory = LLMFactory(config)
+    factory = _get_llm_factory(config)
     provider_cfg = next(
         (p for p in config.get("llm_providers", []) if p["id"] == agent_config.model_provider),
         None,
@@ -166,13 +212,15 @@ def build_llm_for_agent(agent_config):
             api_key = os.environ.get(env_key, "")
     else:
         base_url = _get_default_base_url(agent_config.model_provider)
-    cache_key = _build_llm_cache_key(agent_config.model_id, api_key, base_url, agent_config.temperature)
+    # 解析正确的模型 ID
+    actual_model_id = resolve_model_id(agent_config.model_id)
+    cache_key = _build_llm_cache_key(actual_model_id, api_key, base_url, agent_config.temperature)
     cached = _llm_cache_get(cache_key)
     if cached is not None:
         return cached
     llm = factory.create({
         "provider": agent_config.model_provider,
-        "model": agent_config.model_id,
+        "model": actual_model_id,
         "temperature": agent_config.temperature,
     })
     _llm_cache_put(cache_key, llm)

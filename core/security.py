@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 _SECRET_KEY = os.environ.get("ENCRYPTION_KEY", "gymclaw-default-encryption-key-change-in-production")
+if _SECRET_KEY == "gymclaw-default-encryption-key-change-in-production":
+    logger.warning("[Security] ⚠️ 使用默认加密密钥！请设置 ENCRYPTION_KEY 环境变量以确保 API Key 加密安全。")
 
 
 def _get_cipher():
@@ -180,7 +182,16 @@ _BLOCKED_HOSTNAME_PATTERNS = [
 ]
 
 
+def _check_ip_blocked(ip_obj) -> bool:
+    """检查 IP 是否在被阻止的网络范围内"""
+    for network in BLOCKED_IP_RANGES:
+        if ip_obj in network:
+            return True
+    return False
+
+
 def is_safe_url(url: str) -> Tuple[bool, str]:
+    import socket
     try:
         parsed = urlparse(url)
 
@@ -191,15 +202,27 @@ def is_safe_url(url: str) -> Tuple[bool, str]:
             return False, "URL缺少主机名"
 
         hostname = parsed.hostname
+
+        # 1. 直接 IP 地址检查
         try:
             ip = ipaddress.ip_address(hostname)
-            for network in BLOCKED_IP_RANGES:
-                if ip in network:
-                    return False, "禁止访问内网IP地址"
+            if _check_ip_blocked(ip):
+                return False, "禁止访问内网IP地址"
         except ValueError:
+            # 2. 主机名模式检查
             for pattern in _BLOCKED_HOSTNAME_PATTERNS:
                 if pattern.match(hostname):
                     return False, "禁止访问内网地址"
+
+            # 3. DNS 解析检查（防止 DNS Rebinding 攻击）
+            try:
+                resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                for family, _, _, _, sockaddr in resolved:
+                    resolved_ip = ipaddress.ip_address(sockaddr[0])
+                    if _check_ip_blocked(resolved_ip):
+                        return False, f"域名 {hostname} 解析到内网地址，禁止访问"
+            except socket.gaierror:
+                pass  # DNS 解析失败时不阻止（可能是外部域名暂时不可达）
 
         port = parsed.port
         if port is None:

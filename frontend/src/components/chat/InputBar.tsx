@@ -56,6 +56,7 @@ export function InputBar() {
     messages,
     addMessage,
     setIsStreaming,
+    setStreamingSessionId,
     appendContent,
     appendThinking,
     resetStreaming,
@@ -68,6 +69,7 @@ export function InputBar() {
     setEnableSearch,
     pendingMessage,
     setPendingMessage,
+    finalizeStreamMessage,
   } = useChatStore();
 
   const handleInputChange = useCallback((value: string) => {
@@ -122,6 +124,11 @@ export function InputBar() {
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (textareaRef.current) textareaRef.current.style.height = "";
 
+    if (shouldAutoTitle && currentSessionId) {
+      const snippetTitle = text.length > 30 ? text.slice(0, 30) + "..." : text;
+      updateSessionTitle(currentSessionId, snippetTitle);
+    }
+
     addMessage({
       id: userMsgId,
       role: "user" as const,
@@ -131,6 +138,7 @@ export function InputBar() {
     });
 
     setIsStreaming(true);
+    setStreamingSessionId(currentSessionId);
     resetStreaming();
     abortControllerRef.current = new AbortController();
 
@@ -150,14 +158,22 @@ export function InputBar() {
             setCurrentSkill(event.tool_name || null);
           }
           else if (event.type === "done") {
-            setIsStreaming(false);
-            resetStreaming();
+            finalizeStreamMessage({
+              skill_used: event.skill_used,
+              skill_name: event.skill_name,
+              agents: event.agents,
+            });
             if (event.agent_name || event.model_id) {
               setPipelineInfo({ agentName: event.agent_name || "", modelId: event.model_id || "", skillName: event.skill_name || "" });
             }
-            if (shouldAutoTitle && event.title && currentSessionId) {
-              updateSessionTitle(currentSessionId, event.title);
-              api.sessions.update(currentSessionId, { title: event.title }).catch(() => {});
+            if (shouldAutoTitle && currentSessionId) {
+              const finalTitle = event.title || text.slice(0, 30) + (text.length > 30 ? "..." : "");
+              updateSessionTitle(currentSessionId, finalTitle);
+              api.sessions.update(currentSessionId, { title: finalTitle }).then(() => {
+                api.sessions.list().then((data) => {
+                  useChatStore.getState().setSessions(data.sessions || []);
+                }).catch(() => {});
+              }).catch(() => {});
             }
           } else if (event.type === "error") {
             useChatStore.getState().addMessage({
@@ -180,7 +196,10 @@ export function InputBar() {
           setIsStreaming(false);
           resetStreaming();
         },
-        () => setIsStreaming(false),
+        () => {
+          const s = useChatStore.getState();
+          if (s.isStreaming) s.finalizeStreamMessage();
+        },
         fileIds,
         fileInfos,
         chatMode,
@@ -199,7 +218,7 @@ export function InputBar() {
     } finally {
       abortControllerRef.current = null;
     }
-  }, [input, files, currentSessionId, messages.length, addMessage, setIsStreaming, appendContent, appendThinking, resetStreaming, setCurrentSkill, updateSessionTitle, setPipelineInfo, chatMode, enableSearch, t]);
+  }, [input, files, currentSessionId, messages.length, addMessage, setIsStreaming, setStreamingSessionId, appendContent, appendThinking, resetStreaming, setCurrentSkill, updateSessionTitle, setPipelineInfo, finalizeStreamMessage, chatMode, enableSearch, t]);
 
   useEffect(() => {
     if (!pendingMessage || !currentSessionId) return;
@@ -215,6 +234,11 @@ export function InputBar() {
     const shouldAutoTitle = state.messages.length === 0;
     const userMsgId = generateUniqueId();
 
+    if (shouldAutoTitle && currentSessionId) {
+      const snippetTitle = text.length > 30 ? text.slice(0, 30) + "..." : text;
+      state.updateSessionTitle(currentSessionId, snippetTitle);
+    }
+
     state.addMessage({
       id: userMsgId,
       role: "user" as const,
@@ -223,6 +247,7 @@ export function InputBar() {
     });
 
     state.setIsStreaming(true);
+    state.setStreamingSessionId(currentSessionId);
     state.resetStreaming();
     const ac = new AbortController();
 
@@ -242,14 +267,23 @@ export function InputBar() {
           s.setCurrentSkill(event.tool_name || null);
         }
         else if (event.type === "done") {
-          setIsStreaming(false);
-          resetStreaming();
+          const st = useChatStore.getState();
+          st.finalizeStreamMessage({
+            skill_used: event.skill_used,
+            skill_name: event.skill_name,
+            agents: event.agents,
+          });
           if (event.agent_name || event.model_id) {
             setPipelineInfo({ agentName: event.agent_name || "", modelId: event.model_id || "", skillName: event.skill_name || "" });
           }
-          if (shouldAutoTitle && event.title && currentSessionId) {
-            updateSessionTitle(currentSessionId, event.title);
-            api.sessions.update(currentSessionId, { title: event.title }).catch(() => {});
+          if (shouldAutoTitle && currentSessionId) {
+            const finalTitle = event.title || text.slice(0, 30) + (text.length > 30 ? "..." : "");
+            st.updateSessionTitle(currentSessionId, finalTitle);
+            api.sessions.update(currentSessionId, { title: finalTitle }).then(() => {
+              api.sessions.list().then((data) => {
+                useChatStore.getState().setSessions(data.sessions || []);
+              }).catch(() => {});
+            }).catch(() => {});
           }
         } else if (event.type === "error") {
           const st = useChatStore.getState();
@@ -275,7 +309,8 @@ export function InputBar() {
         st.resetStreaming();
       },
       () => {
-        useChatStore.getState().setIsStreaming(false);
+        const st = useChatStore.getState();
+        if (st.isStreaming) st.finalizeStreamMessage();
         pendingMessageSentRef.current = false;
       },
       undefined,

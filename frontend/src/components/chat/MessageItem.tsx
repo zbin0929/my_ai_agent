@@ -127,9 +127,10 @@ function FilePreviewModal({ file, onClose }: { file: FileInfo; onClose: () => vo
       setLoading(false);
       return;
     }
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/api/files/content/${file.file_id}`)
+    fetch(`/api/files/content/${file.file_id}`, { signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load file");
         return res.json();
@@ -143,10 +144,12 @@ function FilePreviewModal({ file, onClose }: { file: FileInfo; onClose: () => vo
         }
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err.name === "AbortError") return;
         setError("Failed to load file content");
         setLoading(false);
       });
+    return () => controller.abort();
   }, [file]);
 
   const isDownloadOnly = file.type === "document";

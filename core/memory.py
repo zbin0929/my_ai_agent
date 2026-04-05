@@ -296,7 +296,13 @@ class MemoryManager:
             return
         
         if os.path.exists(filepath):
-            os.remove(filepath)
+            if HAS_FILELOCK:
+                lock = FileLock(filepath + ".lock", timeout=5)
+                with lock:
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+            else:
+                os.remove(filepath)
 
         sessions = self.list_sessions()
         sessions = [s for s in sessions if s["id"] != session_id]
@@ -367,30 +373,44 @@ class MemoryManager:
         self._cache_put(session.id, session)
 
     def _update_index(self, session: ChatSession) -> None:
-        sessions = self.list_sessions()
+        index_file = self._index_file()
+        entry = {
+            "id": session.id,
+            "title": session.title,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "message_count": len(session.messages),
+            "summary": session.summary,
+        }
+        if HAS_FILELOCK:
+            lock = FileLock(index_file + ".lock", timeout=5)
+            with lock:
+                self._update_index_inner(index_file, entry)
+        else:
+            self._update_index_inner(index_file, entry)
+
+    def _update_index_inner(self, index_file: str, entry: Dict) -> None:
+        sessions = []
+        if os.path.exists(index_file):
+            try:
+                with open(index_file, "r", encoding="utf-8") as f:
+                    sessions = json.load(f)
+            except Exception:
+                sessions = []
         found = False
         for i, s in enumerate(sessions):
-            if s["id"] == session.id:
-                sessions[i] = {
-                    "id": session.id,
-                    "title": session.title,
-                    "created_at": session.created_at,
-                    "updated_at": session.updated_at,
-                    "message_count": len(session.messages),
-                    "summary": session.summary,
-                }
+            if s["id"] == entry["id"]:
+                sessions[i] = entry
                 found = True
                 break
         if not found:
-            sessions.append({
-                "id": session.id,
-                "title": session.title,
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
-                "message_count": len(session.messages),
-                "summary": session.summary,
-            })
-        self._write_index(sessions)
+            sessions.append(entry)
+        tmp_path = index_file + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, index_file)
 
     def _write_index(self, sessions: List[Dict]) -> None:
         self._safe_write_json(self._index_file(), sessions)
@@ -425,15 +445,18 @@ class MemoryManager:
 
 _global_memory: Optional[MemoryManager] = None
 _global_memory_dir: Optional[str] = None
+_global_memory_lock = threading.Lock()
 
 
 def get_memory_manager(data_dir: str = "data") -> MemoryManager:
     global _global_memory, _global_memory_dir
-    normalized_dir = os.path.abspath(data_dir)
-    if _global_memory is None:
+    if _global_memory is not None:
+        return _global_memory
+    with _global_memory_lock:
+        if _global_memory is not None:
+            return _global_memory
+        normalized_dir = os.path.abspath(data_dir)
         _global_memory = MemoryManager(data_dir)
         _global_memory_dir = normalized_dir
         logger.info(f"[Memory] 创建全局单例，data_dir={normalized_dir}")
-    elif _global_memory_dir != normalized_dir:
-        logger.warning(f"[Memory] 警告：请求的 data_dir={normalized_dir} 与全局单例的 data_dir={_global_memory_dir} 不同")
-    return _global_memory
+        return _global_memory

@@ -32,6 +32,9 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
+from fastapi import Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 from core.errors import AppError
 from core.logging_config import setup_logging
 from api.routes import chat, sessions, agents, skills, models, files
@@ -48,6 +51,19 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 APP_VERSION = "5.11.0"
+
+# [安全加固] Admin Token 认证 — 保护配置修改类接口
+_ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+_security_scheme = HTTPBearer(auto_error=False)
+
+
+async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(_security_scheme)):
+    """验证管理员身份 — 配置修改接口必须携带 Authorization: Bearer <ADMIN_TOKEN>"""
+    if not _ADMIN_TOKEN:
+        return  # 未配置 ADMIN_TOKEN 时跳过认证（开发模式）
+    if not credentials or credentials.credentials != _ADMIN_TOKEN:
+        from fastapi.responses import JSONResponse
+        raise AppError("未授权访问，请提供有效的管理员令牌", code="UNAUTHORIZED", status_code=401)
 
 
 @asynccontextmanager
@@ -173,7 +189,7 @@ async def get_search_config_api():
 
 
 @app.put("/api/config/search")
-async def update_search_config_api(data: dict):
+async def update_search_config_api(data: dict, _=Depends(require_admin)):
     """更新联网搜索配置"""
     import yaml
     provider = data.get("provider", "zhipu_search")
@@ -233,7 +249,7 @@ async def get_providers_config_api():
 
 
 @app.put("/api/config/providers/{provider_id}")
-async def update_provider_config_api(provider_id: str, data: dict):
+async def update_provider_config_api(provider_id: str, data: dict, _=Depends(require_admin)):
     import yaml
     api_key = data.get("api_key", "")
     if not provider_id:

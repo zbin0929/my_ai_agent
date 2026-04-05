@@ -75,11 +75,13 @@ interface StreamSlice {
   isStreaming: boolean;
   streamingContent: string;
   streamingThinking: string;
+  streamingSessionId: string | null;
   currentSkill: string | null;
   pipelineInfo: { agentName: string; modelId: string; skillName: string } | null;
   chatMode: "simple" | "think";
   enableSearch: boolean;
   setIsStreaming: (v: boolean) => void;
+  setStreamingSessionId: (id: string | null) => void;
   appendContent: (chunk: string) => void;
   appendThinking: (chunk: string) => void;
   resetStreaming: () => void;
@@ -94,15 +96,23 @@ const createStreamSlice: StateCreator<ChatState, [], [], StreamSlice> = (set, ge
   isStreaming: false,
   streamingContent: "",
   streamingThinking: "",
+  streamingSessionId: null,
   currentSkill: null,
   pipelineInfo: null,
   chatMode: "think",
   enableSearch: false,
   setIsStreaming: (v) => set({ isStreaming: v }),
+  setStreamingSessionId: (id) => set({ streamingSessionId: id }),
   appendContent: (chunk) =>
-    set((state) => ({ streamingContent: state.streamingContent + chunk })),
+    set((state) => {
+      if (state.streamingSessionId && state.streamingSessionId !== state.currentSessionId) return state;
+      return { streamingContent: state.streamingContent + chunk };
+    }),
   appendThinking: (chunk) =>
-    set((state) => ({ streamingThinking: state.streamingThinking + chunk })),
+    set((state) => {
+      if (state.streamingSessionId && state.streamingSessionId !== state.currentSessionId) return state;
+      return { streamingThinking: state.streamingThinking + chunk };
+    }),
   resetStreaming: () =>
     set({ streamingContent: "", streamingThinking: "", currentSkill: null, pipelineInfo: null }),
   setCurrentSkill: (skill) => set({ currentSkill: skill }),
@@ -111,6 +121,10 @@ const createStreamSlice: StateCreator<ChatState, [], [], StreamSlice> = (set, ge
   setEnableSearch: (v) => set({ enableSearch: v }),
   finalizeStreamMessage: (metadata) => {
     const state = get();
+    if (state.streamingSessionId && state.streamingSessionId !== state.currentSessionId) {
+      set({ isStreaming: false, streamingContent: "", streamingThinking: "", streamingSessionId: null, currentSkill: null, pipelineInfo: null });
+      return;
+    }
     if (state.streamingContent || state.streamingThinking) {
       const newMsg: Message = {
         id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -127,11 +141,12 @@ const createStreamSlice: StateCreator<ChatState, [], [], StreamSlice> = (set, ge
         isStreaming: false,
         streamingContent: "",
         streamingThinking: "",
+        streamingSessionId: null,
         currentSkill: null,
         pipelineInfo: null,
       });
     } else {
-      set({ isStreaming: false, streamingContent: "", streamingThinking: "", currentSkill: null, pipelineInfo: null });
+      set({ isStreaming: false, streamingContent: "", streamingThinking: "", streamingSessionId: null, currentSkill: null, pipelineInfo: null });
     }
   },
 });

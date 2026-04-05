@@ -12,6 +12,7 @@ import os
 import json
 import logging
 import uuid
+import threading
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 
@@ -203,11 +204,16 @@ class AgentManager:
 
 # 全局单例
 _global_manager: Optional[AgentManager] = None
+_global_manager_lock = threading.Lock()
 
 
 def get_agent_manager(data_dir: str = "data") -> AgentManager:
     """获取全局 Agent 管理器单例"""
     global _global_manager
-    if _global_manager is None:
+    if _global_manager is not None:
+        return _global_manager
+    with _global_manager_lock:
+        if _global_manager is not None:
+            return _global_manager
         _global_manager = AgentManager(data_dir)
-    return _global_manager
+        return _global_manager

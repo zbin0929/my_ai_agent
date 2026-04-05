@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 _DATA_DIR = os.path.join(project_root, "data")
 _skills_loaded = False
+_skills_lock = __import__("threading").Lock()
 _shared_client: Optional[httpx.AsyncClient] = None
 _client_lock = asyncio.Lock()
 
@@ -64,13 +65,16 @@ def _ensure_skills():
     global _skills_loaded
     if _skills_loaded:
         return
-    from skills import set_data_dir, load_builtin_skills, load_custom_skills, load_disabled, load_skill_configs
-    set_data_dir(_DATA_DIR)
-    load_builtin_skills()
-    load_custom_skills()
-    load_disabled()
-    load_skill_configs()
-    _skills_loaded = True
+    with _skills_lock:
+        if _skills_loaded:
+            return
+        from skills import set_data_dir, load_builtin_skills, load_custom_skills, load_disabled, load_skill_configs
+        set_data_dir(_DATA_DIR)
+        load_builtin_skills()
+        load_custom_skills()
+        load_disabled()
+        load_skill_configs()
+        _skills_loaded = True
 
 
 def _parse_thinking(text: str) -> tuple[str, str]:
@@ -211,7 +215,7 @@ def _build_history_text(context_messages: list, agent_name: str) -> str:
     return "\n".join(parts)
 
 
-def _build_file_content(files: List[str], user_input: str, upload_dir: str) -> str:
+def _build_file_content_sync(files: List[str], user_input: str, upload_dir: str) -> str:
     if not files:
         return user_input
     resolved = _resolve_file_paths(files, upload_dir)
@@ -230,6 +234,12 @@ def _build_file_content(files: List[str], user_input: str, upload_dir: str) -> s
     if file_text:
         return f"{user_input}\n\n---\n附件内容:\n{file_text}"
     return user_input
+
+
+async def _build_file_content(files: List[str], user_input: str, upload_dir: str) -> str:
+    if not files:
+        return user_input
+    return await asyncio.to_thread(_build_file_content_sync, files, user_input, upload_dir)
 
 
 def _build_chat_messages(system_prompt: str, history_text: str, user_content: str) -> list:
@@ -273,7 +283,7 @@ def _build_manager_system_prompt(agent_config, lang: str = "zh") -> str:
     return base_prompt
 
 
-async def _stream_llm_real(messages, agent_config, tools=None, enable_search=False, enable_thinking=True) -> AsyncGenerator[dict, None]:
+async def _stream_llm_real(messages, agent_config, tools=None, enable_search=False, enable_thinking=False) -> AsyncGenerator[dict, None]:
     api_key, base_url = _resolve_agent_connection(agent_config)
 
     if not base_url:
@@ -299,11 +309,21 @@ async def _stream_llm_real(messages, agent_config, tools=None, enable_search=Fal
         "Content-Type": "application/json",
     }
 
+    # 解析正确的模型 ID
+    from core.model_router import resolve_model_id
+    actual_model_id = resolve_model_id(agent_config.model_id)
+
     payload = {
-        "model": agent_config.model_id,
+        "model": actual_model_id,
         "messages": messages,
         "stream": True,
     }
+
+    # GLM-4.7-Flash 支持通过 enable_thinking 参数切换思考模式
+    if enable_thinking:
+        payload["enable_thinking"] = True
+    else:
+        payload["enable_thinking"] = False
 
     if tools:
         payload["tools"] = tools
@@ -324,6 +344,11 @@ async def _stream_llm_real(messages, agent_config, tools=None, enable_search=Fal
                 payload["tools"] = []
             payload["tools"].append(search_tool)
 
+    # [DEBUG] 记录发送给 LLM 的 payload（用于排查 400 错误）
+    logger.debug(f"[_stream_llm_real] actual_model={actual_model_id}, original_model={agent_config.model_id}, tools_count={len(tools) if tools else 0}, payload_keys={list(payload.keys())}")
+    if tools:
+        logger.debug(f"[_stream_llm_real] tools={json.dumps(tools, ensure_ascii=False)[:500]}")
+
     thinking_buffer = ""
     content_buffer = ""
     in_thinking = False
@@ -334,9 +359,21 @@ async def _stream_llm_real(messages, agent_config, tools=None, enable_search=Fal
         client = await _get_shared_client()
         async with client.stream("POST", url, json=payload, headers=headers) as resp:
             if resp.status_code != 200:
-                await resp.aread()
-                logger.warning(f"LLM API 错误: status={resp.status_code}")
-                yield {"type": "content", "content": f"API 请求失败（状态码 {resp.status_code}），请稍后重试。"}
+                body = (await resp.aread()).decode("utf-8", errors="replace")
+                logger.warning(f"LLM API 错误: status={resp.status_code}, body={body[:500]}")
+                detail = ""
+                try:
+                    import json as _json
+                    err_data = _json.loads(body)
+                    detail = err_data.get("error", {}).get("message", "") or err_data.get("message", "") or err_data.get("msg", "")
+                except Exception:
+                    pass
+                user_msg = f"API 请求失败（状态码 {resp.status_code}）"
+                if detail:
+                    user_msg += f"：{detail}"
+                else:
+                    user_msg += "，请稍后重试。"
+                yield {"type": "content", "content": user_msg}
                 return
 
             async for line in resp.aiter_lines():
@@ -347,7 +384,8 @@ async def _stream_llm_real(messages, agent_config, tools=None, enable_search=Fal
                     # Flush any remaining content in buffer before breaking
                     if content_buffer:
                         if in_thinking:
-                            yield {"type": "thinking", "content": content_buffer}
+                            if enable_thinking:
+                                yield {"type": "thinking", "content": content_buffer}
                         else:
                             yield {"type": "content", "content": content_buffer}
                     break
@@ -422,12 +460,10 @@ def _aggregate_tool_calls(chunks: list) -> list:
     return sorted(aggregated.values(), key=lambda x: x["index"])
 
 
-async def _stream_worker_task(worker_agent, clean_input: str, original_input: str, session_id: str, memory, lang: str, enable_thinking: bool = True) -> AsyncGenerator[str, None]:
+async def _stream_worker_task(worker_agent, clean_input: str, original_input: str, session_id: str, memory, lang: str, enable_thinking: bool = False, file_infos: list = None) -> AsyncGenerator[str, None]:
     from skills import get_tool_schemas_by_skill_ids, get_skills_for_agent, execute_tool_by_name
 
     worker_type = worker_agent.get_agent_type()
-
-    memory.add_message("user", original_input, session_id=session_id)
 
     if worker_type == "runner":
         worker_skill_ids = worker_agent.skills or []
@@ -455,7 +491,7 @@ async def _stream_worker_task(worker_agent, clean_input: str, original_input: st
                     tool_result = await asyncio.to_thread(execute_tool_by_name, tool_name, tool_args)
                     result_msg = tool_result.get("message", "")
                     _t, _c = _parse_thinking(result_msg)
-                    if _t:
+                    if _t and enable_thinking:
                         yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
                     if _c:
                         yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
@@ -464,7 +500,7 @@ async def _stream_worker_task(worker_agent, clean_input: str, original_input: st
             full_response = f"{worker_agent.name} 没有绑定任何技能" if lang == "zh" else f"{worker_agent.name} has no skills assigned"
             yield json.dumps({"type": "content", "content": full_response}, ensure_ascii=False) + "\n"
 
-        memory.add_message("user", original_input, session_id=session_id)
+        memory.add_message("user", original_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
         ai_meta = {"agents": [{"name": worker_agent.name, "model_id": worker_agent.model_id, "role": "worker"}]}
         memory.add_message("assistant", full_response, session_id=session_id, metadata=ai_meta)
 
@@ -528,7 +564,7 @@ async def _stream_worker_task(worker_agent, clean_input: str, original_input: st
                 tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
                 result_msg = tool_result.get("message", "")
                 _t, _c = _parse_thinking(result_msg)
-                if _t:
+                if _t and enable_thinking:
                     yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
                 if _c:
                     yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
@@ -537,7 +573,7 @@ async def _stream_worker_task(worker_agent, clean_input: str, original_input: st
         full_response = "".join(full_response_parts)
         full_thinking = "".join(full_thinking_parts)
 
-        memory.add_message("user", original_input, session_id=session_id)
+        memory.add_message("user", original_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
         ai_meta = {}
         if full_thinking:
             ai_meta["thinking"] = full_thinking
@@ -556,7 +592,7 @@ async def _stream_worker_task(worker_agent, clean_input: str, original_input: st
         yield json.dumps({"type": "error", "content": friendly_error_message(e, lang)}, ensure_ascii=False) + "\n"
 
 
-async def _stream_with_fc(agent_config, clean_input: str, original_input: str, session_id: str, memory, files, file_infos, enable_search=False, enable_thinking=True, lang="zh") -> AsyncGenerator[str, None]:
+async def _stream_with_fc(agent_config, clean_input: str, original_input: str, session_id: str, memory, files, file_infos, enable_search=False, enable_thinking=False, lang="zh") -> AsyncGenerator[str, None]:
     """主管 FC 模式 — 通过 Function Calling 调度员工和工具"""
     if enable_thinking:
         agent_config = _resolve_thinking_agent(agent_config)
@@ -568,7 +604,7 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
     context_messages = memory.get_context_messages(session_id)
     history_text = _build_history_text(context_messages, agent_config.name)
     upload_dir = os.path.join(project_root, "data", "uploads")
-    user_content = _build_file_content(files, clean_input, upload_dir)
+    user_content = await _build_file_content(files, clean_input, upload_dir)
     messages = _build_chat_messages(system_prompt, history_text, user_content)
 
     memory.add_message("user", original_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
@@ -684,7 +720,7 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
                                     tool_result = await asyncio.to_thread(execute_tool_by_name, tool_name, tool_args)
                                     result_msg = tool_result.get("message", "")
                                     _t, _c = _parse_thinking(result_msg)
-                                    if _t:
+                                    if _t and enable_thinking:
                                         yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
                                     if _c:
                                         yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
@@ -714,7 +750,7 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
                         worker_thinking_parts: list[str] = []
                         worker_tool_call_chunks = []
 
-                        async for w_chunk in _stream_llm_real(worker_messages, worker, tools=worker_tools, enable_thinking=enable_thinking):
+                        async for w_chunk in _stream_llm_real(worker_messages, worker, tools=worker_tools, enable_search=enable_search, enable_thinking=enable_thinking):
                             w_type = w_chunk.get("type", "")
                             w_content = w_chunk.get("content", "")
                             if w_type == "thinking":
@@ -740,7 +776,7 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
                                 tool_result = await asyncio.to_thread(execute_tool_by_name, w_func_name, w_func_args)
                                 result_msg = tool_result.get("message", "")
                                 _t, _c = _parse_thinking(result_msg)
-                                if _t:
+                                if _t and enable_thinking:
                                     yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
                                 if _c:
                                     yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
@@ -754,7 +790,7 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
                     tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
                     result_msg = tool_result.get("message", "")
                     thinking, content = _parse_thinking(result_msg)
-                    if thinking:
+                    if thinking and enable_thinking:
                         yield json.dumps({"type": "thinking", "content": thinking}, ensure_ascii=False) + "\n"
                     if content:
                         yield json.dumps({"type": "content", "content": content}, ensure_ascii=False) + "\n"
@@ -795,7 +831,7 @@ async def _stream_normal_chat(agent_config, clean_input: str, original_input: st
     context_messages = memory.get_context_messages(session_id)
     history_text = _build_history_text(context_messages, agent_config.name)
     upload_dir = os.path.join(project_root, "data", "uploads")
-    user_content = _build_file_content(files, clean_input, upload_dir)
+    user_content = await _build_file_content(files, clean_input, upload_dir)
     messages = _build_chat_messages(system_prompt, history_text, user_content)
 
     full_response_parts: list[str] = []
@@ -834,7 +870,7 @@ async def _stream_normal_chat(agent_config, clean_input: str, original_input: st
                 tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
                 result_msg = tool_result.get("message", "")
                 _t, _c = _parse_thinking(result_msg)
-                if _t:
+                if _t and enable_thinking:
                     yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
                 if _c:
                     yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
@@ -972,7 +1008,7 @@ async def stream_message(
             if search_results:
                 clean_input = clean_input + "\n\n---\n以下是与用户问题相关的联网搜索结果，请基于这些信息回答：\n\n" + search_results + "\n---\n"
             else:
-                yield json.dumps({"type": "content", "content": "⚠️ 联网搜索未返回结果，请检查搜索配置。"}, ensure_ascii=False) + "\n"
+                logger.warning("Path B 联网搜索未返回结果，降级为无搜索对话")
 
     # 路径 1：@指派
     if mentions:
@@ -980,7 +1016,7 @@ async def stream_message(
             worker = manager.get_agent_by_name(mention_name)
             if worker:
                 yield json.dumps({"type": "worker", "worker_name": worker.name, "worker_model": worker.model_id}, ensure_ascii=False) + "\n"
-                async for chunk in _stream_worker_task(worker, clean_input, user_input, session_id, memory, lang, enable_thinking=enable_thinking):
+                async for chunk in _stream_worker_task(worker, clean_input, user_input, session_id, memory, lang, enable_thinking=enable_thinking, file_infos=file_infos):
                     yield chunk
                 return
 

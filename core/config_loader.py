@@ -30,6 +30,7 @@ import os
 import re
 import yaml
 import logging
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from copy import deepcopy
@@ -558,6 +559,7 @@ class ConfigLoader:
 
 # [优化] 全局单例缓存 — 避免多处代码重复创建 ConfigLoader 并解析 YAML
 _global_loader: Optional[ConfigLoader] = None
+_global_loader_lock = threading.Lock()
 
 
 def get_config(config_dir: str = "config", reload: bool = False) -> Dict[str, Any]:
@@ -577,7 +579,11 @@ def get_config(config_dir: str = "config", reload: bool = False) -> Dict[str, An
     """
     global _global_loader
     
-    if _global_loader is None or reload:
+    if _global_loader is not None and not reload:
+        return _global_loader.config
+    with _global_loader_lock:
+        if _global_loader is not None and not reload:
+            return _global_loader.config
         _global_loader = ConfigLoader(config_dir)
         _global_loader.load()
     
@@ -597,7 +603,11 @@ def get_loader(config_dir: str = "config", reload: bool = False) -> ConfigLoader
     """
     global _global_loader
     
-    if _global_loader is None or reload:
+    if _global_loader is not None and not reload:
+        return _global_loader
+    with _global_loader_lock:
+        if _global_loader is not None and not reload:
+            return _global_loader
         _global_loader = ConfigLoader(config_dir)
         _global_loader.load()
     
