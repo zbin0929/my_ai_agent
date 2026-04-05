@@ -594,6 +594,7 @@ async def _stream_worker_task(worker_agent, clean_input: str, original_input: st
 
 async def _stream_with_fc(agent_config, clean_input: str, original_input: str, session_id: str, memory, files, file_infos, enable_search=False, enable_thinking=False, lang="zh") -> AsyncGenerator[str, None]:
     """主管 FC 模式 — 通过 Function Calling 调度员工和工具"""
+    logger.info(f"[FC调度] 开始执行, agent={agent_config.name}, enable_thinking={enable_thinking}, clean_input={clean_input[:50]}")
     if enable_thinking:
         agent_config = _resolve_thinking_agent(agent_config)
     from skills import get_unassigned_tool_schemas, get_tool_schemas_by_skill_ids, execute_tool_by_name, get_skills_for_agent
@@ -650,12 +651,14 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
         worker_map[f"assign_to_{safe_name}"] = w
 
     tools = get_unassigned_tool_schemas(assigned_skill_ids) + worker_tool_definitions
+    logger.info(f"[FC调度] 工具列表: {[t.get('function', {}).get('name', 'unknown') for t in tools]}")
 
     full_response_parts: list[str] = []
     full_thinking_parts: list[str] = []
     tool_call_chunks = []
 
     try:
+        logger.info(f"[FC调度] 调用LLM, model={agent_config.model_id}")
         async for chunk in _stream_llm_real(messages, agent_config, tools=tools if tools else None, enable_search=enable_search, enable_thinking=enable_thinking):
             chunk_type = chunk.get("type", "")
             chunk_content = chunk.get("content", "")
@@ -667,6 +670,7 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
                 full_response_parts.append(chunk_content)
                 yield json.dumps({"type": "content", "content": chunk_content}, ensure_ascii=False) + "\n"
             elif chunk_type == "tool_calls":
+                logger.info(f"[FC调度] 收到tool_calls: {chunk['tool_calls']}")
                 tool_call_chunks.append(chunk["tool_calls"])
 
         full_response = "".join(full_response_parts)
@@ -787,7 +791,17 @@ async def _stream_with_fc(agent_config, clean_input: str, original_input: str, s
 
                 else:
                     yield json.dumps({"type": "tool_start", "tool_name": func_name}, ensure_ascii=False) + "\n"
-                    tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
+                    # 查找对应的技能并调用其handler
+                    from skills import get_skill_by_tool_name
+                    skill = get_skill_by_tool_name(func_name)
+                    if skill and skill.get("handler"):
+                        # 技能函数签名: handler(user_input, context)
+                        # 从func_args中提取prompt/text/url作为user_input
+                        user_input_for_skill = func_args.get("prompt") or func_args.get("text") or func_args.get("url") or str(func_args)
+                        context_for_skill = {"files": files, "agent_config": agent_config, "tool_args": func_args}
+                        tool_result = await asyncio.to_thread(skill["handler"], user_input_for_skill, context_for_skill)
+                    else:
+                        tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
                     result_msg = tool_result.get("message", "")
                     thinking, content = _parse_thinking(result_msg)
                     if thinking and enable_thinking:
@@ -1041,11 +1055,14 @@ async def stream_message(
     if not matched:
         matched = match_skill(clean_input)
     if matched:
+        logger.info(f"[技能匹配] 命中技能: {matched['name']} (id={matched['id']}), 用户输入: {clean_input[:50]}")
         memory.add_message("user", user_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
         yield json.dumps({"type": "skill", "skill_name": matched["name"], "skill_icon": matched["icon"]}, ensure_ascii=False) + "\n"
         try:
             handler = matched["handler"]
+            logger.info(f"[技能执行] 开始执行技能 {matched['id']}, handler={handler.__name__}")
             result = await asyncio.to_thread(handler, clean_input, {"files": files, "agent_config": agent})
+            logger.info(f"[技能执行] 技能 {matched['id']} 执行完成, success={result.get('success', False)}")
             result_msg = result.get("message", "") if isinstance(result, dict) else str(result)
             thinking, content = _parse_thinking(result_msg)
 
@@ -1067,7 +1084,10 @@ async def stream_message(
             yield json.dumps(done_event, ensure_ascii=False) + "\n"
             return
         except Exception as e:
-            logger.warning(f"技能执行失败，降级为普通对话: {e}")
+            logger.warning(f"[技能执行] 技能 {matched['id']} 执行失败: {e}", exc_info=True)
+            yield json.dumps({"type": "content", "content": f"技能执行失败: {str(e)}"}, ensure_ascii=False) + "\n"
+            yield json.dumps({"type": "done", "agent_name": agent.name, "model_id": agent.model_id}, ensure_ascii=False) + "\n"
+            return
 
     # 路径 5：普通对话
     async for chunk in _stream_normal_chat(agent, clean_input, user_input, session_id, memory, files, file_infos, enable_thinking=enable_thinking, enable_search=search_via_tool, lang=lang):

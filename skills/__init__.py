@@ -181,6 +181,15 @@ def get_tool_schemas_by_skill_ids(skill_ids: List[str]) -> List[Dict[str, Any]]:
 
 
 def execute_tool_by_name(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """通过工具名称执行对应的技能
+    
+    参数:
+        tool_name: 工具名称(如"generate_image")
+        arguments: 工具参数(如{"prompt": "一只猫"})
+    
+    返回:
+        技能执行结果字典
+    """
     for skill_id, skill in _SKILL_REGISTRY.items():
         schema = skill.get("tool_schema")
         if schema:
@@ -189,10 +198,25 @@ def execute_tool_by_name(tool_name: str, arguments: Dict[str, Any]) -> Dict[str,
                 handler = skill.get("handler")
                 if handler:
                     try:
-                        return handler(**arguments)
+                        # 技能函数签名: handler(user_input, context)
+                        # 从arguments中提取prompt/text/url作为user_input
+                        user_input = arguments.get("prompt") or arguments.get("text") or arguments.get("url") or str(arguments)
+                        context = {"tool_args": arguments, "skill_id": skill_id}
+                        return handler(user_input, context)
                     except Exception as e:
                         return {"success": False, "message": f"工具执行失败: {str(e)}"}
     return {"success": False, "message": f"未找到工具: {tool_name}"}
+
+
+def get_skill_by_tool_name(tool_name: str) -> Optional[Dict[str, Any]]:
+    """通过工具名称查找对应的技能"""
+    for skill_id, skill in _SKILL_REGISTRY.items():
+        schema = skill.get("tool_schema")
+        if schema:
+            func_info = schema.get("function", {})
+            if func_info.get("name") == tool_name:
+                return skill
+    return None
 
 
 def match_skill(user_input: str) -> Optional[Dict[str, Any]]:

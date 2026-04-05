@@ -200,8 +200,9 @@ def handle_image_generate(user_input: str, context: Dict[str, Any]) -> Dict[str,
             f"**描述：** {prompt}\n\n"
         )
         if result.get("url"):
-            msg += f"**预览：** [点击查看]({result['url']})\n\n"
-        msg += f"**本地路径：** `{result['filepath']}`\n\n"
-        return {"success": True, "message": msg}
+            # 使用 markdown 图片语法，前端会渲染为可点击预览的图片
+            msg += f"![生成的图片]({result['url']})\n\n"
+            msg += f"[点击图片查看大图]({result['url']})"
+        return {"success": True, "message": msg, "image_url": result.get("url")}
     else:
         return {"success": False, "message": f"❌ {result['message']}"}
