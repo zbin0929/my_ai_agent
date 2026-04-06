@@ -35,9 +35,14 @@ from slowapi.errors import RateLimitExceeded
 from fastapi import Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from filelock import FileLock
+
 from core.errors import AppError
 from core.logging_config import setup_logging
-from api.routes import chat, sessions, agents, skills, models, files
+from api.routes import chat, sessions, agents, skills, models, files, stats
+
+# 配置文件写入锁 — 防止并发 API 请求同时修改 config.yaml
+_config_file_lock = FileLock(os.path.join(project_root, "config", "config.yaml.lock"), timeout=10)
 
 # [优化] 初始化日志系统 — 同时输出到控制台和文件（RotatingFileHandler 自动轮转）
 setup_logging(
@@ -60,9 +65,9 @@ _security_scheme = HTTPBearer(auto_error=False)
 async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(_security_scheme)):
     """验证管理员身份 — 配置修改接口必须携带 Authorization: Bearer <ADMIN_TOKEN>"""
     if not _ADMIN_TOKEN:
+        logger.warning("ADMIN_TOKEN 未配置，管理接口无认证保护！请在 .env 中设置 ADMIN_TOKEN")
         return  # 未配置 ADMIN_TOKEN 时跳过认证（开发模式）
     if not credentials or credentials.credentials != _ADMIN_TOKEN:
-        from fastapi.responses import JSONResponse
         raise AppError("未授权访问，请提供有效的管理员令牌", code="UNAUTHORIZED", status_code=401)
 
 
@@ -70,13 +75,12 @@ async def require_admin(credentials: HTTPAuthorizationCredentials = Depends(_sec
 async def lifespan(application: FastAPI):
     yield
     try:
-        from core.chat_engine import _shared_client as chat_client_ref
-        import core.chat_engine as chat_mod
-        if chat_mod._shared_client and not chat_mod._shared_client.is_closed:
-            await chat_mod._shared_client.aclose()
-            logger.info("已关闭 chat_engine httpx client")
+        import core.llm_stream as llm_mod
+        if llm_mod._shared_client and not llm_mod._shared_client.is_closed:
+            await llm_mod._shared_client.aclose()
+            logger.info("已关闭 llm_stream httpx client")
     except Exception as e:
-        logger.warning(f"关闭 chat_engine httpx client 失败: {e}")
+        logger.warning(f"关闭 llm_stream httpx client 失败: {e}")
     try:
         import core.search as search_mod
         if search_mod._shared_client and not search_mod._shared_client.is_closed:
@@ -130,10 +134,12 @@ async def log_requests(request: Request, call_next):
 
 # ==================== 跨域配置 ====================
 
-# 跨域配置 — 允许前端开发服务器（localhost:3000）访问后端 API
+# 跨域配置 — 通过环境变量 CORS_ORIGINS 配置允许的前端域名（逗号分隔），默认允许本地开发
+_cors_origins_str = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+_cors_origins = [o.strip() for o in _cors_origins_str.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -151,6 +157,7 @@ app.include_router(agents.router, prefix="/api/agents", tags=["agents"])    # Ag
 app.include_router(skills.router, prefix="/api/skills", tags=["skills"])    # 技能管理
 app.include_router(models.router, prefix="/api/models", tags=["models"])    # 模型管理
 app.include_router(files.router, prefix="/api/files", tags=["files"])       # 文件上传/下载
+app.include_router(stats.router, prefix="/api/stats", tags=["stats"])       # 用量统计
 
 
 @app.get("/api/health")
@@ -198,19 +205,25 @@ async def update_search_config_api(data: dict, _=Depends(require_admin)):
         return {"error": "provider is required"}
     try:
         config_path = os.path.join(project_root, "config", "config.yaml")
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-        if not raw:
-            raw = {}
-        raw["search"] = {
-            "provider": provider,
-            "api_key": api_key or "",
-        }
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(raw, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-        from core.config_loader import _global_loader
-        if _global_loader is not None:
-            _global_loader.config["search"] = raw["search"]
+        with _config_file_lock:
+            with open(config_path, "r", encoding="utf-8") as f:
+                raw = yaml.safe_load(f)
+            if not raw:
+                raw = {}
+            raw["search"] = {
+                "provider": provider,
+                "api_key": api_key or "",
+            }
+            tmp_path = config_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                yaml.dump(raw, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            os.replace(tmp_path, config_path)
+        from core.config_loader import get_loader
+        try:
+            loader = get_loader()
+            loader.update_config_key("search", raw["search"])
+        except Exception:
+            pass
         return {"message": "ok"}
     except Exception as e:
         return {"error": str(e)}
@@ -256,26 +269,29 @@ async def update_provider_config_api(provider_id: str, data: dict, _=Depends(req
         return {"error": "provider_id is required"}
     try:
         config_path = os.path.join(project_root, "config", "config.yaml")
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-        if not raw:
-            return {"error": "config file is empty"}
-        found = False
-        for p in raw.get("llm_providers", []):
-            if p.get("id") == provider_id:
-                p["api_key"] = api_key or ""
-                found = True
-                break
-        if not found:
-            return {"error": f"provider {provider_id} not found"}
-        with open(config_path, "w", encoding="utf-8") as f:
-            yaml.dump(raw, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
-        from core.config_loader import _global_loader
-        if _global_loader is not None:
-            for p in _global_loader.config.get("llm_providers", []):
+        with _config_file_lock:
+            with open(config_path, "r", encoding="utf-8") as f:
+                raw = yaml.safe_load(f)
+            if not raw:
+                return {"error": "config file is empty"}
+            found = False
+            for p in raw.get("llm_providers", []):
                 if p.get("id") == provider_id:
                     p["api_key"] = api_key or ""
+                    found = True
                     break
+            if not found:
+                return {"error": f"provider {provider_id} not found"}
+            tmp_path = config_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                yaml.dump(raw, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+            os.replace(tmp_path, config_path)
+        from core.config_loader import get_loader
+        try:
+            loader = get_loader()
+            loader.update_provider_key(provider_id, api_key or "")
+        except Exception:
+            pass
         return {"message": "ok"}
     except Exception as e:
         return {"error": str(e)}

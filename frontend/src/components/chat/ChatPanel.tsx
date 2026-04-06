@@ -16,19 +16,28 @@ import { WelcomeScreen } from "./WelcomeScreen";
 import { MessageList } from "./MessageList";
 import { InputBar } from "./InputBar";
 
-export function ChatPanel() {
+export function ChatPanel({ onMenuClick }: { onMenuClick?: () => void }) {
   const { currentSessionId, isStreaming, currentSkill, pipelineInfo } = useChatStore();
 
   if (!currentSessionId) {
     return (
       <div className="flex-1 flex flex-col h-full">
-        <WelcomeScreen />
+        <WelcomeScreen onMenuClick={onMenuClick} />
       </div>
     );
   }
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[var(--bg)]">
+      {/* Mobile header with menu button */}
+      <div className="md:hidden flex items-center gap-3 px-4 py-3 border-b border-[var(--border)]">
+        <button onClick={onMenuClick} className="p-2 rounded-lg hover:bg-[var(--bg-hover)]">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 12h18M3 6h18M3 18h18" />
+          </svg>
+        </button>
+        <span className="text-sm font-medium truncate">{currentSessionId}</span>
+      </div>
       <MessageList />
 
       {(isStreaming && (currentSkill || pipelineInfo)) && (

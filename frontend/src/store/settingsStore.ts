@@ -4,11 +4,11 @@ import type { Agent, Model } from "@/types";
 interface SettingsState {
   agents: Agent[];
   models: Model[];
-  activeTab: "agents" | "models" | "skills";
+  activeTab: "agents" | "models" | "skills" | "stats";
 
   setAgents: (agents: Agent[]) => void;
   setModels: (models: Model[]) => void;
-  setActiveTab: (tab: "agents" | "models" | "skills") => void;
+  setActiveTab: (tab: "agents" | "models" | "skills" | "stats") => void;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({

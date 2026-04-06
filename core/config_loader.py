@@ -297,19 +297,21 @@ class ConfigLoader:
         """
         errors = []
         
-        # 验证系统配置
-        if "system" not in self.config:
-            errors.append("缺少 'system' 配置项")
+        # 验证系统配置（兼容 system 和 global 两种格式）
+        if "system" not in self.config and "global" not in self.config:
+            errors.append("缺少 'system' 或 'global' 配置项")
         
-        # 验证默认 LLM 配置
-        if "default_llm" not in self.config:
-            errors.append("缺少 'default_llm' 配置项")
+        # 验证默认 LLM 配置（兼容 default_llm 和 global.llm 两种格式）
+        global_llm = (self.config.get("global", {}) or {}).get("llm", {})
+        default_llm = self.config.get("default_llm", {})
+        effective_llm = default_llm or global_llm
+        if not effective_llm:
+            errors.append("缺少 'default_llm' 或 'global.llm' 配置项")
         else:
-            default_llm = self.config["default_llm"]
-            if "provider" not in default_llm:
-                errors.append("default_llm 缺少 'provider' 字段")
-            if "model" not in default_llm:
-                errors.append("default_llm 缺少 'model' 字段")
+            if "provider" not in effective_llm:
+                errors.append("LLM 配置缺少 'provider' 字段")
+            if "model" not in effective_llm:
+                errors.append("LLM 配置缺少 'model' 字段")
         
         # 验证 LLM 提供商配置
         if "llm_providers" in self.config:
@@ -357,11 +359,13 @@ class ConfigLoader:
                 if task.get("agent") not in agent_ids:
                     errors.append(f"任务 '{task['id']}' 引用了不存在的 Agent: {task.get('agent')}")
                 
-                # 验证任务依赖是否存在
+                # 验证任务依赖是否存在（收集所有任务 ID 后再做二次校验）
+            
+            # 二次校验：验证所有任务的依赖引用
+            for task in self.config["tasks"]:
                 for context_id in task.get("context", []):
                     if context_id not in task_ids:
-                        # 注意：这里可能是前置任务还未处理，跳过此检查
-                        pass
+                        errors.append(f"任务 '{task.get('id')}' 依赖了不存在的任务: {context_id}")
         
         # 如果有错误，抛出异常
         if errors:
@@ -543,6 +547,35 @@ class ConfigLoader:
         """
         return [t for t in self.config.get("tasks", []) if t.get("enabled", True)]
     
+    def update_config_key(self, key: str, value: Any) -> None:
+        """
+        线程安全地更新单个配置项
+        
+        参数：
+            key (str): 配置项的键（支持点号分隔的多级键）
+            value (Any): 新值
+        """
+        keys = key.split(".")
+        target = self.config
+        for k in keys[:-1]:
+            if k not in target:
+                target[k] = {}
+            target = target[k]
+        target[keys[-1]] = value
+
+    def update_provider_key(self, provider_id: str, api_key: str) -> None:
+        """
+        线程安全地更新指定 provider 的 api_key
+        
+        参数：
+            provider_id (str): 提供商 ID
+            api_key (str): 新的 API Key
+        """
+        for p in self.config.get("llm_providers", []):
+            if p.get("id") == provider_id:
+                p["api_key"] = api_key
+                break
+
     def reload(self) -> Dict[str, Any]:
         """
         重新加载配置文件

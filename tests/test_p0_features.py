@@ -144,10 +144,13 @@ class TestAPIKeyEncryption:
     """API Key 加密/解密/脱敏测试"""
 
     def test_encrypt_decrypt_roundtrip(self):
-        from core.security import encrypt_api_key, decrypt_api_key
+        from core.security import encrypt_api_key, decrypt_api_key, _HAS_FERNET
         original = "sk-abc123def456ghi789"
         encrypted = encrypt_api_key(original)
-        assert encrypted.startswith("enc:")
+        if _HAS_FERNET:
+            assert encrypted.startswith("fenc:")
+        else:
+            assert encrypted.startswith("enc:")
         decrypted = decrypt_api_key(encrypted)
         assert decrypted == original
 
@@ -190,11 +193,34 @@ class TestAPIKeyEncryption:
         assert mask_api_key("") == "***"
 
     def test_encrypt_unicode(self):
-        from core.security import encrypt_api_key, decrypt_api_key
+        from core.security import encrypt_api_key, decrypt_api_key, _HAS_FERNET
         original = "密钥-abc-中文测试"
         encrypted = encrypt_api_key(original)
-        assert encrypted.startswith("enc:")
+        if _HAS_FERNET:
+            assert encrypted.startswith("fenc:")
+        else:
+            assert encrypted.startswith("enc:")
         assert decrypt_api_key(encrypted) == original
+
+    def test_backward_compat_xor_decrypt(self):
+        """旧版 enc: XOR 密文应仍可正确解密"""
+        from core.security import _get_xor_cipher, decrypt_api_key
+        import base64 as b64
+        original = "sk-old-key-12345"
+        cipher_key = _get_xor_cipher()
+        data = original.encode("utf-8")
+        xored = bytes(a ^ b for a, b in zip(data, (cipher_key * (len(data) // len(cipher_key) + 1))[:len(data)]))
+        old_encrypted = "enc:" + b64.urlsafe_b64encode(xored).decode()
+        assert decrypt_api_key(old_encrypted) == original
+
+    def test_fernet_different_encryptions_differ(self):
+        """Fernet 同一明文两次加密产生不同密文（随机 IV）"""
+        from core.security import encrypt_api_key, _HAS_FERNET
+        if not _HAS_FERNET:
+            pytest.skip("Fernet not available")
+        enc1 = encrypt_api_key("same-key")
+        enc2 = encrypt_api_key("same-key")
+        assert enc1 != enc2  # Fernet uses random IV
 
 
 # ==================== CHAT-024: MemoryManager 并发安全 ====================
@@ -288,7 +314,7 @@ class TestThinkingFilter:
     @pytest.mark.asyncio
     async def test_stream_llm_real_filters_reasoning_content_when_disabled(self):
         """enable_thinking=False 时，reasoning_content 不应作为 thinking 事件输出"""
-        from core.chat_engine import _stream_llm_real
+        from core.llm_stream import stream_llm_real as _stream_llm_real
 
         # 模拟 LLM SSE 响应：包含 reasoning_content 和 content
         mock_lines = [
@@ -321,8 +347,8 @@ class TestThinkingFilter:
         mock_agent.custom_base_url = "https://api.example.com/v1"
         mock_agent.temperature = 0.7
 
-        with patch("core.chat_engine._get_shared_client", return_value=mock_client):
-            with patch("core.chat_engine._resolve_agent_connection", return_value=("sk-test", "https://api.example.com/v1")):
+        with patch("core.llm_stream.get_shared_client", return_value=mock_client):
+            with patch("core.llm_stream.resolve_agent_connection", return_value=("sk-test", "https://api.example.com/v1")):
                 chunks = []
                 async for chunk in _stream_llm_real(
                     messages=[{"role": "user", "content": "hi"}],
@@ -344,7 +370,7 @@ class TestThinkingFilter:
     @pytest.mark.asyncio
     async def test_stream_llm_real_passes_thinking_when_enabled(self):
         """enable_thinking=True 时，reasoning_content 应作为 thinking 事件输出"""
-        from core.chat_engine import _stream_llm_real
+        from core.llm_stream import stream_llm_real as _stream_llm_real
 
         mock_lines = [
             'data: {"choices":[{"delta":{"reasoning_content":"思考过程"}}]}',
@@ -374,8 +400,8 @@ class TestThinkingFilter:
         mock_agent.custom_base_url = "https://api.example.com/v1"
         mock_agent.temperature = 0.7
 
-        with patch("core.chat_engine._get_shared_client", return_value=mock_client):
-            with patch("core.chat_engine._resolve_agent_connection", return_value=("sk-test", "https://api.example.com/v1")):
+        with patch("core.llm_stream.get_shared_client", return_value=mock_client):
+            with patch("core.llm_stream.resolve_agent_connection", return_value=("sk-test", "https://api.example.com/v1")):
                 chunks = []
                 async for chunk in _stream_llm_real(
                     messages=[{"role": "user", "content": "hi"}],
@@ -391,7 +417,7 @@ class TestThinkingFilter:
     @pytest.mark.asyncio
     async def test_think_tags_filtered_in_simple_mode(self):
         """enable_thinking=False 时，<think>标签内的内容也应被过滤"""
-        from core.chat_engine import _stream_llm_real
+        from core.llm_stream import stream_llm_real as _stream_llm_real
 
         mock_lines = [
             'data: {"choices":[{"delta":{"content":"<think>深度思考中...</think>正式回复"}}]}',
@@ -420,8 +446,8 @@ class TestThinkingFilter:
         mock_agent.custom_base_url = "https://api.example.com/v1"
         mock_agent.temperature = 0.7
 
-        with patch("core.chat_engine._get_shared_client", return_value=mock_client):
-            with patch("core.chat_engine._resolve_agent_connection", return_value=("sk-test", "https://api.example.com/v1")):
+        with patch("core.llm_stream.get_shared_client", return_value=mock_client):
+            with patch("core.llm_stream.resolve_agent_connection", return_value=("sk-test", "https://api.example.com/v1")):
                 chunks = []
                 async for chunk in _stream_llm_real(
                     messages=[{"role": "user", "content": "hi"}],
@@ -547,3 +573,201 @@ class TestSensitiveRequestDetection:
     def test_allows_code_question(self):
         from core.security import is_sensitive_request
         assert not is_sensitive_request("请帮我写一个 Python 排序算法")
+
+
+# ==================== 新模块回归测试 ====================
+
+class TestResolveProviderCredentials:
+    """resolve_provider_credentials 统一凭证解析"""
+
+    def test_custom_api_key_priority(self):
+        """Agent 自带 key 优先"""
+        from core.model_router import resolve_provider_credentials
+
+        class FakeAgent:
+            custom_api_key = "sk-custom-123"
+            custom_base_url = "https://custom.api.com/v1"
+            model_provider = "openai"
+
+        key, url = resolve_provider_credentials(FakeAgent())
+        assert key == "sk-custom-123"
+        assert url == "https://custom.api.com/v1"
+
+    def test_custom_key_with_default_base_url(self):
+        """Agent 自带 key 但无 base_url，从 provider 推断"""
+        from core.model_router import resolve_provider_credentials, PROVIDER_BASE_URLS
+
+        class FakeAgent:
+            custom_api_key = "sk-test"
+            custom_base_url = ""
+            model_provider = "deepseek"
+
+        key, url = resolve_provider_credentials(FakeAgent())
+        assert key == "sk-test"
+        assert url == PROVIDER_BASE_URLS["deepseek"]
+
+    def test_no_credentials_returns_empty(self):
+        """无配置时返回空"""
+        from core.model_router import resolve_provider_credentials
+
+        class FakeAgent:
+            custom_api_key = ""
+            custom_base_url = ""
+            model_provider = "nonexistent_provider"
+
+        key, url = resolve_provider_credentials(FakeAgent())
+        assert key == ""
+
+
+class TestStreamWorkerContent:
+    """_stream_worker_content 共享 worker 内容生成"""
+
+    @pytest.mark.asyncio
+    async def test_runner_no_skills_yields_message(self):
+        """runner 无技能时应 yield 提示消息"""
+        from core.worker_executor import stream_worker_content
+
+        class FakeWorker:
+            name = "TestRunner"
+            model_id = "test-model"
+            skills = []
+            def get_agent_type(self):
+                return "runner"
+
+        result = {}
+        chunks = []
+        async for chunk in stream_worker_content(FakeWorker(), "hello", result=result):
+            chunks.append(chunk)
+
+        assert len(chunks) == 1
+        data = json.loads(chunks[0])
+        assert data["type"] == "content"
+        assert "TestRunner" in data["content"]
+        assert result["response"] != ""
+
+    @pytest.mark.asyncio
+    async def test_result_dict_populated(self):
+        """result dict 应被正确填充"""
+        from core.worker_executor import stream_worker_content
+
+        class FakeWorker:
+            name = "TestRunner"
+            model_id = "test-model"
+            skills = []
+            def get_agent_type(self):
+                return "runner"
+
+        result = {}
+        async for _ in stream_worker_content(FakeWorker(), "hello", result=result):
+            pass
+
+        assert "response" in result
+        assert "thinking" in result
+
+
+# ==================== Token 估算 + 动态上下文裁剪 ====================
+
+class TestTokenEstimation:
+    """estimate_tokens / estimate_message_tokens 测试"""
+
+    def test_empty_string(self):
+        from core.memory import estimate_tokens
+        assert estimate_tokens("") == 0
+
+    def test_pure_english(self):
+        from core.memory import estimate_tokens
+        # "hello world" = 11 chars, ~11*0.25+1 ≈ 4
+        tokens = estimate_tokens("hello world")
+        assert 2 <= tokens <= 10
+
+    def test_pure_chinese(self):
+        from core.memory import estimate_tokens
+        # "你好世界" = 4 中文字符, ~4*0.7+1 ≈ 4
+        tokens = estimate_tokens("你好世界")
+        assert 2 <= tokens <= 8
+
+    def test_mixed(self):
+        from core.memory import estimate_tokens
+        tokens = estimate_tokens("hello 你好")
+        assert tokens > 0
+
+    def test_message_tokens_adds_overhead(self):
+        from core.memory import estimate_tokens, estimate_message_tokens
+        msg = {"role": "user", "content": "hello"}
+        base = estimate_tokens("hello")
+        msg_tokens = estimate_message_tokens(msg)
+        assert msg_tokens == base + 4  # 4 token overhead
+
+
+class TestContextTrimming:
+    """get_context_messages 动态上下文裁剪测试"""
+
+    def test_fits_within_budget(self):
+        from core.memory import MemoryManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mm = MemoryManager(tmpdir)
+            session = mm.create_session(title="test", session_id="trim_test")
+            # Add 100 messages
+            for i in range(100):
+                mm.add_message("user", f"消息{i} " + "x" * 200, session_id="trim_test")
+            ctx = mm.get_context_messages("trim_test", max_tokens=500)
+            # Should be fewer than 100 messages
+            assert len(ctx) < 100
+            assert len(ctx) > 0
+
+    def test_respects_max_tokens(self):
+        from core.memory import MemoryManager, estimate_message_tokens
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mm = MemoryManager(tmpdir)
+            mm.create_session(title="test", session_id="budget_test")
+            for i in range(20):
+                mm.add_message("user", f"Short msg {i}", session_id="budget_test")
+            ctx = mm.get_context_messages("budget_test", max_tokens=100)
+            total = sum(estimate_message_tokens(m) for m in ctx)
+            assert total <= 120  # small tolerance
+
+    def test_preserves_most_recent(self):
+        from core.memory import MemoryManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mm = MemoryManager(tmpdir)
+            mm.create_session(title="test", session_id="recent_test")
+            for i in range(10):
+                mm.add_message("user", f"msg_{i}", session_id="recent_test")
+            ctx = mm.get_context_messages("recent_test", max_tokens=5000)
+            # Last message should be the most recent
+            last = ctx[-1]
+            assert "msg_9" in last["content"]
+
+    def test_injects_summary_when_present(self):
+        from core.memory import MemoryManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mm = MemoryManager(tmpdir)
+            session = mm.create_session(title="test", session_id="summary_test")
+            mm.add_message("user", "hello", session_id="summary_test")
+            # Manually set summary
+            session = mm.load_session("summary_test")
+            session.summary = "这是历史摘要"
+            mm._save_session(session)
+            mm._cache_invalidate("summary_test")
+
+            ctx = mm.get_context_messages("summary_test", max_tokens=5000)
+            # First message should be the summary
+            assert ctx[0]["role"] == "system"
+            assert "历史摘要" in ctx[0]["content"]
+
+
+class TestResolveAgentConnectionDelegation:
+    """llm_stream.resolve_agent_connection 应委托到 model_router"""
+
+    def test_delegates_correctly(self):
+        from core.llm_stream import resolve_agent_connection
+        from core.model_router import resolve_provider_credentials
+
+        class FakeAgent:
+            custom_api_key = "sk-delegate-test"
+            custom_base_url = "https://delegate.test/v1"
+            model_provider = "openai"
+
+        a_key, a_url = resolve_agent_connection(FakeAgent())
+        b_key, b_url = resolve_provider_credentials(FakeAgent())
+        assert (a_key, a_url) == (b_key, b_url)

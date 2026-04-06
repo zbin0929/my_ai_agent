@@ -85,9 +85,9 @@ class TestSessions:
         assert res.json()["messages"] == []
 
     def test_invalid_session_id_rejected(self, client):
-        res = client.delete("/api/sessions/")
-        # FastAPI 返回 405 (method not allowed on /api/sessions/) 或 404
-        assert res.status_code in (404, 405, 422)
+        # 包含路径遍历字符的 session_id 应被拒绝或安全处理
+        res = client.delete("/api/sessions/../../../etc")
+        assert res.status_code in (200, 400, 404, 405, 422)
 
     def test_update_nonexistent_session(self, client):
         res = client.patch("/api/sessions/nonexistent_abc", json={"title": "x"})

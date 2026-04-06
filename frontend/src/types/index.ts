@@ -27,6 +27,7 @@ export interface Message {
   skill_used?: string;           // 触发的技能 ID
   skill_name?: string;           // 触发的技能名称
   agents?: AgentInfo[];          // 参与的 Agent 列表
+  isError?: boolean;             // 是否为错误消息（用于分级展示）
 }
 
 /** 会话 */
@@ -115,7 +116,7 @@ export interface FileInfo {
 
 /** SSE 事件 — 流式聊天的每个数据块 */
 export interface SSEEvent {
-  type: "thinking" | "content" | "skill" | "done" | "error" | "worker" | "tool_start" | "user_message";  // 事件类型
+  type: "thinking" | "content" | "skill" | "done" | "error" | "worker" | "tool_start" | "user_message" | "title";  // 事件类型
   content?: string;              // 内容片段（type=content 时）
   skill_used?: string;           // 触发的技能 ID（type=skill 时）
   skill_name?: string;           // 触发的技能名称（type=skill 时）

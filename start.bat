@@ -60,7 +60,7 @@ if "%1"=="restart" (
     timeout /t 2 /nobreak >nul
 )
 
-echo === Starting GymClaw v5.11.0 ===
+echo === Starting GymClaw v5.15.0 (Sprite Office Edition) ===
 echo.
 
 REM --- 启动后端 ---

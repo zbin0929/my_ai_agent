@@ -65,6 +65,12 @@ class AgentFactory:
         for template in config.get("agent_templates", []):
             self.templates[template["id"]] = template
         
+        # 预索引：agent_id -> agent_config（O(1) 查找）
+        self._agent_configs: Dict[str, Dict] = {}
+        for a in config.get("agents", []):
+            if "id" in a:
+                self._agent_configs[a["id"]] = a
+        
         # Agent 实例缓存
         self._agents: Dict[str, Agent] = {}
         
@@ -141,11 +147,9 @@ class AgentFactory:
         return agents
     
     def _find_agent_config(self, agent_id: str) -> Optional[Dict]:
-        """查找 Agent 配置"""
-        for agent in self.config.get("agents", []):
-            if agent.get("id") == agent_id:
-                return agent.copy()
-        return None
+        """查找 Agent 配置（O(1) 预索引查找）"""
+        cfg = self._agent_configs.get(agent_id)
+        return cfg.copy() if cfg else None
     
     def _merge_template(self, agent_config: Dict) -> Dict:
         """

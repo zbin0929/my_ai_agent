@@ -14,6 +14,7 @@ import { useState, useRef } from "react";
 import { useChatStore } from "@/store/chatStore";
 import { useI18n } from "@/store/i18nStore";
 import { api } from "@/lib/api";
+import { ChatInputToolbar } from "./ChatInputToolbar";
 
 const SUGGESTIONS = [
   { icon: "💡", key: "s1" },
@@ -22,7 +23,7 @@ const SUGGESTIONS = [
   { icon: "🔍", key: "s4" },
 ];
 
-export function WelcomeScreen() {
+export function WelcomeScreen({ onMenuClick }: { onMenuClick?: () => void }) {
   const { addSession, setCurrentSession, setMessages, setPendingMessage, chatMode, setChatMode, enableSearch, setEnableSearch } = useChatStore();
   const { t } = useI18n();
   const [input, setInput] = useState("");
@@ -49,6 +50,14 @@ export function WelcomeScreen() {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4">
+      {/* Mobile menu button */}
+      <div className="md:hidden absolute top-4 left-4">
+        <button onClick={onMenuClick} className="p-2 rounded-lg hover:bg-[var(--bg-hover)]">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 12h18M3 6h18M3 18h18" />
+          </svg>
+        </button>
+      </div>
       <div className="w-full max-w-[720px]">
         <div className="mb-8">
           <h1 className="text-[32px] font-semibold text-[var(--text)] mb-2">{t("welcome")}</h1>
@@ -59,73 +68,11 @@ export function WelcomeScreen() {
           <div className="px-5 pt-4">
             <textarea value={input} onChange={(e) => { setInput(e.target.value); e.target.style.height = "auto"; e.target.style.height = Math.min(e.target.scrollHeight, 300) + "px"; }} onKeyDown={handleKeyDown} onFocus={() => setIsFocused(true)} onBlur={() => setIsFocused(false)} placeholder={t("placeholder")} rows={3} className="w-full resize-none text-[15px] text-[var(--text)] focus:outline-none min-h-[72px] max-h-[300px] bg-transparent placeholder:text-[var(--text-3)]" style={{ lineHeight: "1.6" }} />
           </div>
-          <div className="flex items-center justify-between px-3 py-3">
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-2.5 py-1 text-[12px] text-[var(--text-2)] hover:text-[var(--accent)] hover:bg-[var(--accent-bg)] rounded-full transition-all"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-                </svg>
-                {t("attachment")}
-              </button>
-
-              <div className="w-px h-4 bg-[var(--border)] mx-1" />
-
-              <button
-                onClick={() => setEnableSearch(!enableSearch)}
-                className={
-                  "flex items-center gap-1.5 px-2.5 py-1 text-[12px] rounded-full transition-all " +
-                  (enableSearch
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                    : "text-[var(--text-3)] hover:text-[var(--text-2)]")
-                }
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                </svg>
-                {t("webSearch")}
-              </button>
-
-              <div className="w-px h-4 bg-[var(--border)] mx-1" />
-
-              <div className="flex items-center bg-[var(--bg-hover)] rounded-full p-0.5">
-                <button
-                  onClick={() => setChatMode("simple")}
-                  className={
-                    "px-3 py-1 text-[12px] rounded-full transition-all " +
-                    (chatMode === "simple"
-                      ? "bg-[var(--bg)] text-[var(--accent)] shadow-sm font-medium"
-                      : "text-[var(--text-3)] hover:text-[var(--text-2)]")
-                  }
-                >
-                  {t("modeSimple")}
-                </button>
-                <button
-                  onClick={() => setChatMode("think")}
-                  className={
-                    "px-3 py-1 text-[12px] rounded-full transition-all flex items-center gap-1 " +
-                    (chatMode === "think"
-                      ? "bg-[var(--bg)] text-[var(--accent)] shadow-sm font-medium"
-                      : "text-[var(--text-3)] hover:text-[var(--text-2)]")
-                  }
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 6v6l4 2" />
-                  </svg>
-                  {t("modeThink")}
-                </button>
-              </div>
-            </div>
-
-            <button onClick={() => startChat(input)} disabled={!hasInput} className={"w-9 h-9 rounded-full flex items-center justify-center transition-all " + (hasInput ? "bg-[var(--accent)] text-white shadow-[0_2px_8px_rgba(79,70,229,0.3)] hover:opacity-90 hover:scale-105" : "bg-[var(--bg-hover)] text-[var(--text-3)] cursor-not-allowed")}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
-            </button>
-          </div>
+          <ChatInputToolbar
+            hasInput={hasInput}
+            onAttachClick={() => fileInputRef.current?.click()}
+            onSend={() => startChat(input)}
+          />
         </div>
         <div className="flex flex-wrap gap-2 mt-6 justify-center">
           {SUGGESTIONS.map((s, i) => (

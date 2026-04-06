@@ -1,25 +1,38 @@
 # -*- coding: utf-8 -*-
 import os
 import json
+import tempfile
 from fastapi import APIRouter, HTTPException
+from filelock import FileLock
 from api.schemas import SkillCreate, SkillUpdate
 from api.deps import DATA_DIR
 
 router = APIRouter()
 
 SKILLS_FILE = os.path.join(DATA_DIR, "custom_skills.json")
+SKILLS_LOCK = FileLock(SKILLS_FILE + ".lock", timeout=10)
 
 
 def _load_custom_skills() -> list:
-    if os.path.exists(SKILLS_FILE):
-        with open(SKILLS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+    with SKILLS_LOCK:
+        if os.path.exists(SKILLS_FILE):
+            with open(SKILLS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
     return []
 
 
 def _save_custom_skills(skills: list):
-    with open(SKILLS_FILE, "w", encoding="utf-8") as f:
-        json.dump(skills, f, ensure_ascii=False, indent=2)
+    with SKILLS_LOCK:
+        dir_name = os.path.dirname(SKILLS_FILE)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(skills, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, SKILLS_FILE)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
 
 
 @router.get("")

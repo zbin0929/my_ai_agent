@@ -11,12 +11,15 @@
 import os
 import json
 import logging
+import tempfile
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
+from filelock import FileLock
 from api.schemas import ModelCreate, ModelUpdate
 from api.deps import DATA_DIR
 from core.errors import friendly_error_message
 from core.security import encrypt_api_key, decrypt_api_key, mask_api_key
+from core.model_info import get_model_capabilities, find_model_with_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ router = APIRouter()
 
 # 自定义模型持久化存储路径
 MODELS_FILE = os.path.join(DATA_DIR, "custom_models.json")
+MODELS_LOCK = FileLock(MODELS_FILE + ".lock", timeout=10)
 
 # 项目根目录
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -41,22 +45,56 @@ def _load_system_models() -> list:
     return []
 
 
-# 模块初始化时加载一次，避免每次请求都读磁盘
-SYSTEM_MODELS = _load_system_models()
+# 系统模型缓存及刷新机制
+_system_models_cache = _load_system_models()
+_system_models_mtime: float = 0.0
+try:
+    if os.path.exists(SYSTEM_MODELS_FILE):
+        _system_models_mtime = os.path.getmtime(SYSTEM_MODELS_FILE)
+except Exception:
+    pass
+
+
+def _get_system_models() -> list:
+    """获取系统模型列表，文件变更时自动刷新缓存"""
+    global _system_models_cache, _system_models_mtime
+    try:
+        if os.path.exists(SYSTEM_MODELS_FILE):
+            current_mtime = os.path.getmtime(SYSTEM_MODELS_FILE)
+            if current_mtime > _system_models_mtime:
+                _system_models_cache = _load_system_models()
+                _system_models_mtime = current_mtime
+    except Exception:
+        pass
+    return _system_models_cache
+
+
+# 向后兼容：模块级别引用
+SYSTEM_MODELS = _system_models_cache
 
 
 def _load_custom_models() -> list:
-    """从 JSON 文件加载自定义模型列表"""
-    if os.path.exists(MODELS_FILE):
-        with open(MODELS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+    """从 JSON 文件加载自定义模型列表（带文件锁）"""
+    with MODELS_LOCK:
+        if os.path.exists(MODELS_FILE):
+            with open(MODELS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
     return []
 
 
 def _save_custom_models(models: list):
-    """将自定义模型列表保存到 JSON 文件"""
-    with open(MODELS_FILE, "w", encoding="utf-8") as f:
-        json.dump(models, f, ensure_ascii=False, indent=2)
+    """将自定义模型列表原子写入 JSON 文件（带文件锁）"""
+    with MODELS_LOCK:
+        dir_name = os.path.dirname(MODELS_FILE)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(models, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, MODELS_FILE)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
 
 
 # 提供商到环境变量的映射 — 用于判断哪些内置模型可用
@@ -75,25 +113,6 @@ def _has_provider_key(provider: str) -> bool:
     return bool(env_key and os.environ.get(env_key))
 
 
-def get_model_capabilities(model_id: str) -> list:
-    """获取指定模型的 capabilities 列表"""
-    for m in SYSTEM_MODELS:
-        if m.get("model_id") == model_id or m.get("id") == model_id:
-            return m.get("capabilities", [])
-    custom = _load_custom_models()
-    for m in custom:
-        if m.get("model_id") == model_id or m.get("id") == model_id:
-            return m.get("capabilities", [])
-    return []
-
-
-def find_model_with_capabilities(required_caps: list) -> dict:
-    """查找支持指定能力集的第一个可用模型"""
-    custom = _load_custom_models()
-    candidates = [m for m in SYSTEM_MODELS + custom if all(c in m.get("capabilities", []) for c in required_caps)]
-    return candidates[0] if candidates else None
-
-
 @router.get("")
 async def list_models():
     """
@@ -104,7 +123,7 @@ async def list_models():
     """
     custom = _load_custom_models()
     # 过滤：只显示已配置 API Key 的内置模型
-    available_system = [m for m in SYSTEM_MODELS if _has_provider_key(m.get("provider", ""))]
+    available_system = [m for m in _get_system_models() if _has_provider_key(m.get("provider", ""))]
     # 过滤：自定义模型需要自带 API Key 或提供商已配置
     available_custom = [m for m in custom if m.get("api_key") or _has_provider_key(m.get("provider", ""))]
     # 返回自定义模型（api_key 脱敏）
@@ -204,7 +223,7 @@ async def test_model(model_id: str):
             break
     # 再在内置模型中查找
     if not found:
-        for sm in SYSTEM_MODELS:
+        for sm in _get_system_models():
             if sm["id"] == model_id:
                 found = sm
                 break

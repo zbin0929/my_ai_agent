@@ -18,7 +18,7 @@ import { api } from "@/lib/api";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { Session } from "@/types";
 
-export function Sidebar() {
+export function Sidebar({ onClose }: { onClose?: () => void }) {
   const {
     sessions,
     currentSessionId,
@@ -90,6 +90,23 @@ export function Sidebar() {
     }
   };
 
+  const handleExport = async (id: string) => {
+    try {
+      const blob = await api.sessions.exportMarkdown(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `chat_${id}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setMenuOpen(null);
+    } catch (e) {
+      console.error("Export failed:", e);
+    }
+  };
+
   const handleClearAll = async () => {
     try {
       await api.sessions.clearAll();
@@ -109,6 +126,7 @@ export function Sidebar() {
     }
     setCurrentSession(id);
     setMessages([]);
+    onClose?.();  // Close mobile drawer when session selected
     try {
       const data = await api.sessions.getMessages(id);
       setMessages(
@@ -131,6 +149,17 @@ export function Sidebar() {
 
   return (
     <aside className="w-[280px] min-w-[280px] bg-[var(--bg-sidebar)] border-r border-[var(--border)] flex flex-col h-full">
+      {/* Mobile close button */}
+      {onClose && (
+        <div className="md:hidden flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+          <span className="font-medium text-sm">{t("sessions")}</span>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-[var(--bg-hover)]">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       <div className="p-4 pb-2">
         <button
           onClick={handleNewChat}
@@ -166,6 +195,7 @@ export function Sidebar() {
                 }}
                 onDelete={() => handleDelete(s.id)}
                 onPin={() => handlePin(s.id, s.pinned)}
+                onExport={() => handleExport(s.id)}
               />
             ))}
           </div>
@@ -192,6 +222,7 @@ export function Sidebar() {
                 }}
                 onDelete={() => handleDelete(s.id)}
                 onPin={() => handlePin(s.id, s.pinned)}
+                onExport={() => handleExport(s.id)}
               />
             ))}
           </div>
@@ -218,6 +249,7 @@ export function Sidebar() {
                 }}
                 onDelete={() => handleDelete(s.id)}
                 onPin={() => handlePin(s.id, s.pinned)}
+                onExport={() => handleExport(s.id)}
               />
             ))}
           </div>
@@ -244,6 +276,7 @@ export function Sidebar() {
                 }}
                 onDelete={() => handleDelete(s.id)}
                 onPin={() => handlePin(s.id, s.pinned)}
+                onExport={() => handleExport(s.id)}
               />
             ))}
           </div>
@@ -257,9 +290,10 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* 底部：设置 + 清理 + 语言切换 */}
+      {/* 底部：办公室 + 设置 + 清理 + 语言切换 */}
       <div className="p-3 border-t border-[var(--border)] flex flex-col gap-1">
         <ThemeToggle />
+        <ViewToggle />
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCurrentSession("__settings__")}
@@ -366,6 +400,7 @@ function SessionItem({
   onRename,
   onDelete,
   onPin,
+  onExport,
 }: {
   session: Session;
   active: boolean;
@@ -377,6 +412,7 @@ function SessionItem({
   onRename: () => void;
   onDelete: () => void;
   onPin: () => void;
+  onExport: () => void;
 }) {
   return (
     <div
@@ -414,12 +450,45 @@ function SessionItem({
           <button className="w-full px-3 py-2.5 text-left text-sm hover:bg-[var(--bg-hover)] text-[var(--text-2)] transition-colors">
             {t("share")}
           </button>
+          <button onClick={onExport} className="w-full px-3 py-2.5 text-left text-sm hover:bg-[var(--bg-hover)] transition-colors">
+            {t("export")}
+          </button>
           <div className="border-t border-[var(--border)] my-1" />
           <button onClick={onDelete} className="w-full px-3 py-2.5 text-left text-sm hover:bg-red-50 text-[var(--red)] transition-colors">
             {t("delete")}
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ViewToggle() {
+  const viewMode = useChatStore((s) => s.viewMode);
+  const setViewMode = useChatStore((s) => s.setViewMode);
+
+  return (
+    <div className="flex rounded-xl bg-[var(--bg-hover)] p-0.5">
+      <button
+        onClick={() => setViewMode("chat")}
+        className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+          viewMode === "chat"
+            ? "bg-[var(--bg)] text-[var(--text)] shadow-sm"
+            : "text-[var(--text-3)] hover:text-[var(--text-2)]"
+        }`}
+      >
+        💬 聊天
+      </button>
+      <button
+        onClick={() => setViewMode("office")}
+        className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+          viewMode === "office"
+            ? "bg-[var(--bg)] text-[var(--text)] shadow-sm"
+            : "text-[var(--text-3)] hover:text-[var(--text-2)]"
+        }`}
+      >
+        🏢 办公室
+      </button>
     </div>
   );
 }

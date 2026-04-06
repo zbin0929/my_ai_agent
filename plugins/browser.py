@@ -19,6 +19,7 @@
 """
 
 import logging
+import time
 from typing import Any, Dict, Type
 
 from pydantic import BaseModel, Field
@@ -136,6 +137,3 @@ class BrowserTool(BasePluginTool):
             self.log_error(f"浏览器操作失败: {e}")
             return f"❌ 操作失败: {e}"
 
-
-# 需要导入 time 模块
-import time

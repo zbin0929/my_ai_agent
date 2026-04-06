@@ -39,13 +39,22 @@ def _get_config(key: str, default: str = "") -> str:
     return default
 
 
-def generate_image(prompt: str) -> Dict[str, Any]:
+VALID_SIZES = {
+    "1024x1024", "768x1344", "864x1152",
+    "1344x768", "1152x864", "1440x720", "720x1440",
+}
+
+
+def generate_image(prompt: str, size: str = None) -> Dict[str, Any]:
     api_key = _get_config("api_key") or os.environ.get("ZHIPU_API_KEY", "")
     if not api_key:
         return {"success": False, "message": "未配置 API Key，请在技能设置中配置图片生成 API Key，或设置环境变量 ZHIPU_API_KEY"}
 
     model = _get_config("model", "cogview-4-250304")
-    size = _get_config("size", "1024x1024")
+    if size and size in VALID_SIZES:
+        pass  # 使用传入的 size
+    else:
+        size = _get_config("size", "1024x1024")
 
     try:
         api_url = "https://open.bigmodel.cn/api/paas/v4/images/generations"
@@ -84,9 +93,12 @@ def generate_image(prompt: str) -> Dict[str, Any]:
             with open(filepath, "wb") as f:
                 f.write(img_resp.content)
 
+        # 返回本地API URL，避免外部URL签名过期问题
+        local_url = f"/api/files/images/{filename}"
         return {
             "success": True,
-            "url": image_url,
+            "url": local_url,
+            "original_url": image_url,
             "filepath": filepath,
             "filename": filename,
         }
@@ -97,6 +109,27 @@ def generate_image(prompt: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"图片生成失败: {e}")
         return {"success": False, "message": f"图片生成失败: {e}"}
+
+
+# 关键词 → 尺寸映射，用于关键词匹配路径解析用户意图
+_SIZE_KEYWORDS = {
+    "竖版": "768x1344", "竖图": "768x1344", "竖屏": "768x1344",
+    "手机壁纸": "768x1344", "海报": "768x1344", "portrait": "768x1344",
+    "横版": "1344x768", "横图": "1344x768", "横屏": "1344x768",
+    "封面": "1344x768", "桌面壁纸": "1344x768", "landscape": "1344x768",
+    "横幅": "1440x720", "banner": "1440x720",
+    "长图": "720x1440",
+}
+
+
+def _detect_size_from_text(text: str) -> tuple:
+    """从用户输入中检测尺寸意图，返回 (size, cleaned_text)"""
+    text_lower = text.lower()
+    for keyword, size in _SIZE_KEYWORDS.items():
+        if keyword in text_lower:
+            cleaned = text.replace(keyword, "").strip()
+            return size, cleaned
+    return None, text
 
 
 @register_skill(
@@ -173,6 +206,11 @@ def generate_image(prompt: str) -> Dict[str, Any]:
                         "type": "string",
                         "description": "图片的描述文字，如'一只可爱的猫咪'、'科技感的未来城市'",
                     },
+                    "size": {
+                        "type": "string",
+                        "description": "图片尺寸。正方形用1024x1024，竖版/海报/手机壁纸用768x1344或864x1152，横版/封面/桌面壁纸用1344x768或1152x864，超宽横幅用1440x720，超高竖幅用720x1440。默认1024x1024",
+                        "enum": ["1024x1024", "768x1344", "864x1152", "1344x768", "1152x864", "1440x720", "720x1440"],
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -192,17 +230,26 @@ def handle_image_generate(user_input: str, context: Dict[str, Any]) -> Dict[str,
             "message": "请告诉我你想生成什么图片？比如：「帮我画一只可爱的猫咪」",
         }
 
-    result = generate_image(prompt)
+    # 从 context 中获取 FC 传入的 size，或从用户文本中检测尺寸意图
+    size = None
+    tool_args = context.get("tool_args", {}) if context else {}
+    if tool_args.get("size"):
+        size = tool_args["size"]
+    else:
+        size, prompt = _detect_size_from_text(prompt)
+
+    result = generate_image(prompt, size=size)
 
     if result["success"]:
+        # 使用本地URL，避免外部URL签名过期
+        local_url = result.get("url", "")
         msg = (
             f"🎨 **图片已生成！**\n\n"
             f"**描述：** {prompt}\n\n"
         )
-        if result.get("url"):
+        if local_url:
             # 使用 markdown 图片语法，前端会渲染为可点击预览的图片
-            msg += f"![生成的图片]({result['url']})\n\n"
-            msg += f"[点击图片查看大图]({result['url']})"
-        return {"success": True, "message": msg, "image_url": result.get("url")}
+            msg += f"![生成的图片]({local_url})"
+        return {"success": True, "message": msg, "image_url": local_url}
     else:
         return {"success": False, "message": f"❌ {result['message']}"}

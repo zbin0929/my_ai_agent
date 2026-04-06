@@ -61,7 +61,28 @@ export function StreamingMessage({ content, thinking, skill }: { content: string
         {content && (
           <>
             <div className="ai-message">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  img: ({ src, alt }) => (
+                    <img
+                      src={typeof src === "string" ? src : undefined}
+                      alt={alt || "生成的图片"}
+                      className="max-w-full rounded-xl border border-[var(--border)] cursor-pointer hover:opacity-90 transition-opacity"
+                      style={{ maxHeight: "400px", objectFit: "contain" }}
+                      onClick={() => typeof src === "string" && window.open(src, "_blank")}
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = "none";
+                        const errorDiv = document.createElement("div");
+                        errorDiv.className = "text-red-500 text-sm p-2 bg-red-50 dark:bg-red-900/20 rounded-lg";
+                        errorDiv.textContent = "图片加载失败";
+                        target.parentNode?.insertBefore(errorDiv, target);
+                      }}
+                    />
+                  ),
+                }}
+              >{content}</ReactMarkdown>
             </div>
             <div className="mt-1 flex items-center gap-1">
               <button

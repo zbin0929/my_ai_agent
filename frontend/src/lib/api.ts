@@ -103,6 +103,24 @@ export const api = {
     delete: (id: string) => request(`/sessions/${id}`, { method: "DELETE" }),
     clearAll: () => request<{ ok: boolean; deleted_count: number }>("/sessions", { method: "DELETE" }),
     getMessages: (id: string) => request<{ messages: import("@/types").Message[]; summary: string }>(`/sessions/${id}/messages`),
+    exportMarkdown: async (id: string): Promise<Blob> => {
+      const base = getStreamBase().replace("/api", "");
+      const res = await fetch(`${base}/api/sessions/${id}/export?format=markdown`);
+      if (!res.ok) throw new Error("Export failed");
+      return res.blob();
+    },
+  },
+  // 用量统计接口
+  stats: {
+    get: () => request<{
+      total_sessions: number;
+      total_messages: number;
+      today_messages: number;
+      week_messages: number;
+      month_messages: number;
+      top_models: { model: string; count: number }[];
+      top_skills: { skill: string; count: number }[];
+    }>("/stats"),
   },
   // Agent 管理接口
   agents: {
@@ -303,6 +321,7 @@ export async function streamChat(
   // 缓冲区：存储未完成的 SSE 行（可能一个 chunk 包含不完整的行）
   let buffer = "";
 
+  let doneReceived = false;
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -327,16 +346,20 @@ export async function streamChat(
         try {
           const event: import("@/types").SSEEvent = JSON.parse(payload);
           onEvent(event);
-          // 收到 done 事件表示 AI 回复结束
+          // 收到 done 事件表示 AI 回复主体结束，但继续读取后续事件（如异步生成的 title）
           if (event.type === "done") {
+            doneReceived = true;
             onDone();
+          }
+          // 收到 title 事件（done 之后异步生成的标题），处理后结束流
+          if (event.type === "title") {
             return;
           }
         } catch {}
       }
     }
-    // 流正常结束（无 done 事件）
-    onDone();
+    // 流正常结束（无 done 事件时才补调 onDone）
+    if (!doneReceived) onDone();
   } catch (err) {
     onError(err instanceof Error ? err : new Error(String(err)));
   }

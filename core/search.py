@@ -80,7 +80,7 @@ async def search_zhipu(query: str, api_key: str) -> str:
     }
 
     try:
-        client = _get_shared_client()
+        client = await _get_shared_client()
         resp = await client.post(ZHIPU_SEARCH_URL, json=payload, headers=headers)
         if resp.status_code != 200:
             logger.warning(f"智谱搜索 API 错误: {resp.status_code}")

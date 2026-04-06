@@ -20,9 +20,11 @@ interface SessionSlice {
   sessions: Session[];
   currentSessionId: string | null;
   pendingMessage: string | null;
+  viewMode: "chat" | "office";
   setSessions: (sessions: Session[]) => void;
   setCurrentSession: (id: string | null) => void;
   setPendingMessage: (msg: string | null) => void;
+  setViewMode: (mode: "chat" | "office") => void;
   updateSessionTitle: (id: string, title: string) => void;
   removeSession: (id: string) => void;
   addSession: (session: Session) => void;
@@ -33,9 +35,11 @@ const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> = (set) 
   sessions: [],
   currentSessionId: null,
   pendingMessage: null,
+  viewMode: "chat",
   setSessions: (sessions) => set({ sessions }),
   setCurrentSession: (id) => set({ currentSessionId: id }),
   setPendingMessage: (msg) => set({ pendingMessage: msg }),
+  setViewMode: (mode) => set({ viewMode: mode }),
   updateSessionTitle: (id, title) =>
     set((state) => ({
       sessions: state.sessions.map((s) => (s.id === id ? { ...s, title } : s)),
@@ -60,6 +64,8 @@ interface MessageSlice {
   messages: Message[];
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
+  removeMessagesAfter: (messageId: string) => void;
+  updateMessage: (messageId: string, content: string) => void;
 }
 
 const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> = (set) => ({
@@ -67,6 +73,18 @@ const createMessageSlice: StateCreator<ChatState, [], [], MessageSlice> = (set) 
   setMessages: (messages) => set({ messages }),
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
+  removeMessagesAfter: (messageId) =>
+    set((state) => {
+      const idx = state.messages.findIndex((m) => m.id === messageId);
+      if (idx === -1) return state;
+      return { messages: state.messages.slice(0, idx + 1) };
+    }),
+  updateMessage: (messageId, content) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === messageId ? { ...m, content } : m
+      ),
+    })),
 });
 
 // ==================== Stream Slice ====================

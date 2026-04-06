@@ -20,12 +20,35 @@ _SKILL_CONFIGS: Dict[str, Dict[str, str]] = {}
 _DISABLED_SKILLS: set = set()
 _CUSTOM_SKILLS_FILE = None
 _SKILL_CONFIGS_FILE = None
+_TOOL_NAME_INDEX: Dict[str, str] = {}  # tool_name -> skill_id, O(1) 查找缓存
 
 CAPABILITY_TOOL_MAP = {
     "image_gen": "image_generate",
     "tts": "tts",
     "web_scrape": "web_scrape",
 }
+
+# 同义词扩展表：key 是规范触发词，value 是同义词列表
+# match_skill 会自动将同义词映射为规范触发词进行匹配
+_SYNONYM_MAP: Dict[str, List[str]] = {
+    "画": ["绘", "作画", "绘图", "绘画", "画图", "画一张", "画一幅", "生成图", "生成图片", "生成一张图", "出图", "AI画", "AI绘图"],
+    "图片": ["照片", "插画", "插图", "美图", "海报"],
+    "翻译": ["translate", "翻成", "译成", "帮我翻", "翻一下"],
+    "语音": ["朗读", "读出来", "念出来", "播报", "tts", "文字转语音", "配音"],
+    "抓取": ["爬取", "爬虫", "抓网页", "网页抓取", "scrape", "crawl"],
+    "总结": ["摘要", "概括", "归纳", "summarize", "summary", "帮我总结"],
+    "分析": ["数据分析", "analyze", "analysis", "图表", "统计"],
+    "提醒": ["定时", "闹钟", "reminder", "提醒我", "到时候"],
+    "代码": ["编程", "写代码", "运行代码", "执行代码", "code", "python"],
+    "搜索": ["搜一下", "查一下", "查找", "search", "联网搜索", "帮我搜"],
+    "知识库": ["knowledge", "知识问答", "文档问答", "RAG"],
+}
+
+# 构建反向索引：同义词 → 规范词
+_SYNONYM_REVERSE: Dict[str, str] = {}
+for _canonical, _synonyms in _SYNONYM_MAP.items():
+    for _syn in _synonyms:
+        _SYNONYM_REVERSE[_syn.lower()] = _canonical.lower()
 
 
 def _get_custom_skills_file():
@@ -180,6 +203,17 @@ def get_tool_schemas_by_skill_ids(skill_ids: List[str]) -> List[Dict[str, Any]]:
     return schemas
 
 
+def _rebuild_tool_name_index():
+    """重建 tool_name -> skill_id 索引，供 O(1) 查找"""
+    _TOOL_NAME_INDEX.clear()
+    for skill_id, skill in _SKILL_REGISTRY.items():
+        schema = skill.get("tool_schema")
+        if schema:
+            func_name = schema.get("function", {}).get("name", "")
+            if func_name:
+                _TOOL_NAME_INDEX[func_name] = skill_id
+
+
 def execute_tool_by_name(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     """通过工具名称执行对应的技能
     
@@ -190,37 +224,54 @@ def execute_tool_by_name(tool_name: str, arguments: Dict[str, Any]) -> Dict[str,
     返回:
         技能执行结果字典
     """
-    for skill_id, skill in _SKILL_REGISTRY.items():
-        schema = skill.get("tool_schema")
-        if schema:
-            func_info = schema.get("function", {})
-            if func_info.get("name") == tool_name:
-                handler = skill.get("handler")
-                if handler:
-                    try:
-                        # 技能函数签名: handler(user_input, context)
-                        # 从arguments中提取prompt/text/url作为user_input
-                        user_input = arguments.get("prompt") or arguments.get("text") or arguments.get("url") or str(arguments)
-                        context = {"tool_args": arguments, "skill_id": skill_id}
-                        return handler(user_input, context)
-                    except Exception as e:
-                        return {"success": False, "message": f"工具执行失败: {str(e)}"}
+    # O(1) 查找
+    skill_id = _TOOL_NAME_INDEX.get(tool_name)
+    if skill_id:
+        skill = _SKILL_REGISTRY.get(skill_id)
+        if skill:
+            handler = skill.get("handler")
+            if handler:
+                try:
+                    user_input = arguments.get("prompt") or arguments.get("text") or arguments.get("url") or str(arguments)
+                    context = {"tool_args": arguments, "skill_id": skill_id}
+                    return handler(user_input, context)
+                except Exception as e:
+                    return {"success": False, "message": f"工具执行失败: {str(e)}"}
     return {"success": False, "message": f"未找到工具: {tool_name}"}
 
 
 def get_skill_by_tool_name(tool_name: str) -> Optional[Dict[str, Any]]:
-    """通过工具名称查找对应的技能"""
-    for skill_id, skill in _SKILL_REGISTRY.items():
-        schema = skill.get("tool_schema")
-        if schema:
-            func_info = schema.get("function", {})
-            if func_info.get("name") == tool_name:
-                return skill
+    """通过工具名称查找对应的技能（O(1) 查找）"""
+    skill_id = _TOOL_NAME_INDEX.get(tool_name)
+    if skill_id:
+        return _SKILL_REGISTRY.get(skill_id)
     return None
+
+
+def _expand_text_with_synonyms(text: str) -> str:
+    """将用户输入中的同义词替换为规范词，扩展匹配范围
+    
+    对英文同义词使用 word boundary 匹配，避免 'code' 匹配 'unicode' 等误触发
+    """
+    import re
+    expanded = text
+    for synonym, canonical in _SYNONYM_REVERSE.items():
+        if canonical in text:
+            continue
+        # 英文同义词使用 word boundary 匹配
+        if synonym.isascii():
+            if re.search(r'\b' + re.escape(synonym) + r'\b', text, re.IGNORECASE):
+                expanded += " " + canonical
+        else:
+            # 中文同义词使用子串匹配
+            if synonym in text:
+                expanded += " " + canonical
+    return expanded
 
 
 def match_skill(user_input: str) -> Optional[Dict[str, Any]]:
     text = user_input.lower()
+    expanded_text = _expand_text_with_synonyms(text)
     best_match = None
     best_score = 0
 
@@ -235,6 +286,8 @@ def match_skill(user_input: str) -> Optional[Dict[str, Any]]:
             trigger_lower = trigger.lower()
             if trigger_lower in text:
                 score += len(trigger_lower)
+            elif trigger_lower in expanded_text:
+                score += len(trigger_lower) * 0.8  # 同义词匹配权重略低
 
         if score > best_score:
             best_score = score
@@ -247,6 +300,7 @@ def match_skill_for_agent(user_input: str, agent_skill_ids: List[str]) -> Option
     if not agent_skill_ids:
         return None
     text = user_input.lower()
+    expanded_text = _expand_text_with_synonyms(text)
     best_match = None
     best_score = 0
 
@@ -260,6 +314,8 @@ def match_skill_for_agent(user_input: str, agent_skill_ids: List[str]) -> Option
             trigger_lower = trigger.lower()
             if trigger_lower in text:
                 score += len(trigger_lower)
+            elif trigger_lower in expanded_text:
+                score += len(trigger_lower) * 0.8
 
         if score > best_score:
             best_score = score
@@ -273,12 +329,23 @@ def load_builtin_skills():
         "skills.image_generate",
         "skills.tts",
         "skills.web_scrape",
+        "skills.code_execute",
+        "skills.translate",
+        "skills.doc_summary",
+        "skills.knowledge_base",
+        "skills.data_analysis",
+        "skills.reminder",
+        "skills.search_report",
+        "skills.email_send",
+        "skills.task_manager",
+        "skills.media_understand",
     ]
     for module_name in skill_modules:
         try:
             importlib.import_module(module_name)
         except ImportError as e:
             logger.warning(f"技能模块加载失败: {module_name} - {e}")
+    _rebuild_tool_name_index()
 
 
 def load_custom_skills():
@@ -298,6 +365,7 @@ def load_custom_skills():
                 prompt=s["prompt"],
                 examples=s.get("examples", []),
             )
+        _rebuild_tool_name_index()
     except Exception as e:
         logger.warning(f"加载自定义技能失败: {e}")
 

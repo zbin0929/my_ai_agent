@@ -39,9 +39,9 @@ def get_agent_manager():
 
 
 def get_config_loader():
-    """加载 config/ 目录下的配置文件（config.yaml 等）"""
-    from core.config_loader import ConfigLoader
-    return ConfigLoader(os.path.join(project_root, "config")).load()
+    """加载 config/ 目录下的配置文件（config.yaml 等），使用全局单例避免重复解析"""
+    from core.config_loader import get_config
+    return get_config(os.path.join(project_root, "config"))
 
 
 def get_llm_factory():

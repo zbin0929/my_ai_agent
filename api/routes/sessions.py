@@ -1,7 +1,9 @@
+import re
 import uuid
 import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import PlainTextResponse
 from api.schemas import SessionCreate, SessionUpdate
 from api.deps import DATA_DIR
 from core.security import sanitize_file_id
@@ -146,3 +148,71 @@ async def share_session(session_id: str):
 
     share_id = uuid.uuid4().hex[:8]
     return {"share_id": share_id, "share_url": f"/share/{share_id}"}
+
+
+@router.get("/{session_id}/export")
+async def export_session(session_id: str, format: str = "markdown"):
+    """导出会话为 Markdown 格式"""
+    session_id = _sanitize_session_id(session_id)
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Invalid session_id")
+
+    session = _get_memory().load_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if format not in ("markdown", "md"):
+        raise HTTPException(status_code=400, detail="Unsupported format. Use 'markdown'.")
+
+    lines = [f"# {session.title}\n"]
+    if session.summary:
+        lines.append(f"> **摘要**: {session.summary}\n")
+    lines.append(f"*导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*\n")
+    lines.append("---\n")
+
+    for msg in session.messages:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        ts = msg.get("timestamp")
+        time_str = ""
+        if ts:
+            try:
+                time_str = f" *({datetime.fromtimestamp(ts).strftime('%H:%M:%S')})*"
+            except Exception:
+                pass
+
+        if role == "user":
+            lines.append(f"### 🧑 用户{time_str}\n")
+        elif role == "assistant":
+            agent_name = ""
+            agents = msg.get("agents", [])
+            if agents:
+                agent_name = f" ({agents[0].get('name', '')})"
+            lines.append(f"### 🤖 助手{agent_name}{time_str}\n")
+        elif role == "system":
+            lines.append(f"### ⚙️ 系统{time_str}\n")
+        else:
+            lines.append(f"### {role}{time_str}\n")
+
+        lines.append(content + "\n")
+
+        # 附件
+        files = msg.get("files", [])
+        if files:
+            lines.append("\n**附件:**")
+            for f in files:
+                fname = f.get("filename", f.get("file_id", ""))
+                lines.append(f"- 📎 {fname}")
+            lines.append("")
+
+        lines.append("")
+
+    md_content = "\n".join(lines)
+    safe_title = re.sub(r'[^\w\u4e00-\u9fff\s\-]', '_', session.title).strip()[:30]
+    filename = f"{safe_title}_{session_id}.md"
+
+    return PlainTextResponse(
+        content=md_content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

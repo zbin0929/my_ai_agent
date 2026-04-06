@@ -13,7 +13,7 @@ set "PID_DIR=%PROJECT_ROOT%.pids"
 set "BACKEND_PID_FILE=%PID_DIR%\backend.pid"
 set "FRONTEND_PID_FILE=%PID_DIR%\frontend.pid"
 
-echo Stopping GymClaw...
+echo Stopping GymClaw v5.15.0...
 
 REM --- 停止后端 ---
 if exist "%BACKEND_PID_FILE%" (

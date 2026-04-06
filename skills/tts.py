@@ -164,14 +164,16 @@ def handle_tts(user_input: str, context: Dict[str, Any]) -> Dict[str, Any]:
 
     if result["success"]:
         size_kb = result["file_size"] / 1024
+        # 安全：不暴露本地路径，只返回文件名和下载URL
+        filename = result["filename"]
+        download_url = f"/api/files/tts/{filename}"
         msg = (
             f"🔊 **语音已生成！**\n\n"
             f"**文本：** {text[:100]}{'...' if len(text) > 100 else ''}\n\n"
             f"**音色：** {voice_names.get(voice_key, voice_key)}\n\n"
-            f"**文件：** `{result['filepath']}`\n\n"
             f"**大小：** {size_kb:.1f} KB\n\n"
-            f"可以下载文件直接播放。"
+            f"[点击下载音频]({download_url})"
         )
-        return {"success": True, "message": msg, "audio_file": result["filepath"]}
+        return {"success": True, "message": msg, "audio_url": download_url, "filename": filename}
     else:
         return {"success": False, "message": f"❌ {result['message']}"}

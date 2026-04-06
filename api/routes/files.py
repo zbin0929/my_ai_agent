@@ -27,15 +27,15 @@ router = APIRouter()
 
 
 def _sanitize_filename(filename: str) -> str:
-    """安全清理文件名，防止路径遍历攻击，只保留字母数字、下划线、连字符和点"""
+    """安全清理文件名，防止路径遍历攻击，保留 Unicode 字母/数字、下划线、连字符和点"""
     if not filename:
         return ""
     # 移除路径分隔符和危险字符
     filename = re.sub(r'[\\/:\*?"<>|]', "", filename)
     # 移除 .. 序列防止目录穿越
     filename = filename.replace("..", "")
-    # 只保留安全字符
-    filename = re.sub(r'[^a-zA-Z0-9_.\-]', "", filename)
+    # 保留 Unicode 字母/数字 + 安全 ASCII 符号（支持中文等多语言文件名）
+    filename = re.sub(r'[^\w.\-]', "", filename, flags=re.UNICODE)
     return filename.strip()
 
 
@@ -60,7 +60,7 @@ ALLOWED_EXTENSIONS = {
     ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".cs",
     ".rb", ".php", ".sql", ".r", ".m", ".swift", ".kt", ".dart",
     ".sh", ".bash", ".zsh", ".bat", ".ps1",
-    ".toml", ".ini", ".cfg", ".conf", ".env", ".properties",
+    ".toml", ".ini", ".cfg", ".conf", ".properties",
     ".zip", ".tar", ".gz", ".rar", ".7z",
     ".log", ".map",
     ".woff", ".woff2", ".ttf", ".eot",
@@ -74,7 +74,7 @@ NO_EXT_FILENAMES = {
 
 # 点开头的特殊配置文件名
 DOT_FILENAMES = {
-    ".gitignore", ".env", ".editorconfig", ".eslintrc", ".prettierrc",
+    ".gitignore", ".editorconfig", ".eslintrc", ".prettierrc",
     ".babelrc", ".npmrc", ".zshrc", ".bashrc", ".bash_profile", ".profile",
     ".gitattributes", ".gitmodules",
 }
@@ -108,11 +108,9 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     filename = file.filename
     ext = os.path.splitext(filename)[1].lower()
 
-    # 检查文件类型是否在白名单中
-    if ext and ext not in ALLOWED_EXTENSIONS and not _is_allowed_file(filename):
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
-    if not ext and not _is_allowed_file(filename):
-        raise HTTPException(status_code=400, detail=f"Unsupported file: {filename}")
+    # 统一使用 _is_allowed_file 进行白名单检查
+    if not _is_allowed_file(filename):
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or filename}")
 
     # 读取文件内容并检查大小限制
     content = await file.read()
@@ -179,12 +177,64 @@ async def download_file(file_id: str):
     return FileResponse(fp, filename=file_id)
 
 
+# TTS 音频输出目录
+TTS_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "tts_output")
+
+# 生成图片输出目录
+IMAGES_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "generated_images")
+
+
+@router.get("/tts/{filename}")
+async def download_tts_file(filename: str):
+    """下载TTS生成的音频文件 — 含路径遍历防护"""
+    # 清理文件名，防止路径遍历
+    filename = _sanitize_filename(filename)
+    if not filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # 只允许 .mp3 扩展名
+    if not filename.endswith(".mp3"):
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    fp = os.path.join(TTS_OUTPUT_DIR, filename)
+    # 安全检查：确保路径在允许的目录内
+    if not _is_safe_path(TTS_OUTPUT_DIR, fp):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(fp) or not os.path.isfile(fp):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(fp, filename=filename, media_type="audio/mpeg")
+
+
+@router.get("/images/{filename}")
+async def download_generated_image(filename: str):
+    """下载AI生成的图片文件 — 含路径遍历防护"""
+    # 清理文件名，防止路径遍历
+    filename = _sanitize_filename(filename)
+    if not filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    # 只允许图片扩展名
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    fp = os.path.join(IMAGES_OUTPUT_DIR, filename)
+    # 安全检查：确保路径在允许的目录内
+    if not _is_safe_path(IMAGES_OUTPUT_DIR, fp):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(fp) or not os.path.isfile(fp):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    media_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
+    return FileResponse(fp, filename=filename, media_type=media_types.get(ext, "image/png"))
+
+
 # 文本类扩展名集合（用于文件内容读取接口）
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".log",
     ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".astro",
     ".html", ".htm", ".css", ".scss", ".sass", ".less", ".xml", ".svg",
-    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env", ".properties",
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".properties",
     ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".cs",
     ".rb", ".php", ".sql", ".r", ".m", ".swift", ".kt", ".dart",
     ".sh", ".bash", ".zsh", ".bat", ".ps1",
@@ -247,23 +297,25 @@ async def get_file_content(file_id: str):
         return {"type": "binary", "content": None, "filename": file_id, "ext": ext}
 
 
+# 文件类型检测常量（模块级，避免每次调用重建）
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".tif", ".svg"}
+_DOC_EXTS = {".pdf", ".doc", ".docx"}
+_SHEET_EXTS = {".xls", ".xlsx", ".csv"}
+_AUDIO_EXTS = {".mp3", ".wav"}
+_VIDEO_EXTS = {".mp4", ".avi", ".mov", ".webm", ".flv", ".mkv"}
+
+
 def _detect_file_type(ext: str) -> str:
     """根据扩展名判断文件大类：image/document/spreadsheet/audio/video/text"""
-    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff", ".tif", ".svg"}
-    doc_exts = {".pdf", ".doc", ".docx"}
-    sheet_exts = {".xls", ".xlsx", ".csv"}
-    audio_exts = {".mp3", ".wav"}
-    video_exts = {".mp4", ".avi", ".mov", ".webm", ".flv", ".mkv"}
-
-    if ext in image_exts:
+    if ext in _IMAGE_EXTS:
         return "image"
-    elif ext in doc_exts:
+    elif ext in _DOC_EXTS:
         return "document"
-    elif ext in sheet_exts:
+    elif ext in _SHEET_EXTS:
         return "spreadsheet"
-    elif ext in audio_exts:
+    elif ext in _AUDIO_EXTS:
         return "audio"
-    elif ext in video_exts:
+    elif ext in _VIDEO_EXTS:
         return "video"
     else:
         return "text"

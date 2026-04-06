@@ -15,6 +15,17 @@ FRONTEND_LOG="$PROJECT_ROOT/logs/frontend.log"
 
 mkdir -p "$PID_DIR" "$PROJECT_ROOT/logs"
 
+# 强制杀掉占用端口的进程
+kill_port() {
+    local port=$1
+    local pids=$(lsof -ti:$port 2>/dev/null)
+    if [ -n "$pids" ]; then
+        echo "[CLEAN] Killing processes on port $port: $pids"
+        echo "$pids" | xargs kill -9 2>/dev/null
+        sleep 1
+    fi
+}
+
 check_running() {
     local pid_file="$1"
     local name="$2"
@@ -58,7 +69,7 @@ if [ "$1" = "restart" ]; then
     sleep 2
 fi
 
-echo "=== Starting GymClaw v5.11.0 ==="
+echo "=== Starting GymClaw v5.15.0 (Sprite Office Edition) ==="
 echo ""
 
 # --- 检测 Python 命令 ---
@@ -94,6 +105,9 @@ LOG_LEVEL=$(echo "${LOG_LEVEL:-info}" | tr '[:upper:]' '[:lower:]')
 if check_running "$BACKEND_PID_FILE" "Backend"; then
     :
 else
+    # 清理端口占用
+    kill_port 8000
+    
     echo "[START] Starting backend on :8000 ..."
     nohup $PYTHON_CMD -m uvicorn api.main:app \
         --host 0.0.0.0 \
@@ -115,6 +129,9 @@ fi
 if check_running "$FRONTEND_PID_FILE" "Frontend"; then
     :
 else
+    # 清理端口占用
+    kill_port 3000
+    
     echo "[START] Starting frontend on :3000 ..."
     cd "$PROJECT_ROOT/frontend"
     nohup $NPM_CMD run dev >> "$FRONTEND_LOG" 2>&1 &

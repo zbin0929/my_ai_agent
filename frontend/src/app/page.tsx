@@ -11,17 +11,20 @@
 
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useChatStore } from "@/store/chatStore";
 import { api } from "@/lib/api";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { OfficeView } from "@/components/office/OfficeView";
 
 export default function Home() {
-  const { setSessions, currentSessionId } = useChatStore();
+  const { setSessions } = useChatStore();
   const showSettings = useChatStore((s) => s.currentSessionId === "__settings__");
+  const viewMode = useChatStore((s) => s.viewMode);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     api.sessions.list().then((data) => {
@@ -29,12 +32,32 @@ export default function Home() {
     }).catch(() => {});
   }, [setSessions]);
 
+  const mainContent = showSettings
+    ? <SettingsPage />
+    : viewMode === "office"
+      ? <OfficeView />
+      : <ChatPanel onMenuClick={() => setSidebarOpen(true)} />;
+
   return (
     <ErrorBoundary>
       <div className="flex h-screen bg-[var(--bg)]">
-        <Sidebar />
+        {/* Desktop sidebar */}
+        <div className="hidden md:block">
+          <Sidebar />
+        </div>
+        {/* Mobile drawer overlay */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+        {/* Mobile drawer sidebar */}
+        <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 md:hidden ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}>
+          <Sidebar onClose={() => setSidebarOpen(false)} />
+        </div>
         <main className="flex-1 flex flex-col min-w-0">
-          {showSettings ? <SettingsPage /> : <ChatPanel />}
+          {mainContent}
         </main>
       </div>
     </ErrorBoundary>

@@ -106,10 +106,14 @@ class AgentManager:
                 with lock:
                     with open(tmp_path, "w", encoding="utf-8") as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
+                        f.flush()
+                        os.fsync(f.fileno())
                     os.replace(tmp_path, self.config_file)
             else:
                 with open(tmp_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
                 os.replace(tmp_path, self.config_file)
         except Exception as e:
             logger.error(f"保存 Agent 配置失败: {e}")
@@ -210,7 +214,11 @@ _global_manager_lock = threading.Lock()
 def get_agent_manager(data_dir: str = "data") -> AgentManager:
     """获取全局 Agent 管理器单例"""
     global _global_manager
+    normalized_dir = os.path.abspath(data_dir)
     if _global_manager is not None:
+        existing_dir = os.path.abspath(_global_manager.data_dir)
+        if existing_dir != normalized_dir:
+            logger.warning(f"[AgentManager] data_dir 不一致：已初始化={existing_dir}，请求={normalized_dir}，使用已有实例")
         return _global_manager
     with _global_manager_lock:
         if _global_manager is not None:

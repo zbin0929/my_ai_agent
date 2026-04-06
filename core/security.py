@@ -31,31 +31,75 @@ _SECRET_KEY = os.environ.get("ENCRYPTION_KEY", "gymclaw-default-encryption-key-c
 if _SECRET_KEY == "gymclaw-default-encryption-key-change-in-production":
     logger.warning("[Security] ⚠️ 使用默认加密密钥！请设置 ENCRYPTION_KEY 环境变量以确保 API Key 加密安全。")
 
+# Fernet 加密（优先）或 XOR 降级
+try:
+    from cryptography.fernet import Fernet as _Fernet, InvalidToken as _InvalidToken
+    _HAS_FERNET = True
+except ImportError:
+    _HAS_FERNET = False
+    logger.warning("[Security] cryptography 未安装，使用 XOR 降级加密。建议: pip install cryptography")
 
-def _get_cipher():
+
+_fernet_instance = None
+
+def _get_fernet():
+    """从 ENCRYPTION_KEY 派生 Fernet 实例（32 字节 → url-safe base64），缓存复用"""
+    global _fernet_instance
+    if _fernet_instance is None:
+        key = hashlib.sha256(_SECRET_KEY.encode()).digest()
+        _fernet_instance = _Fernet(base64.urlsafe_b64encode(key))
+    return _fernet_instance
+
+
+def _get_xor_cipher():
+    """旧版 XOR 密钥（用于解密迁移兼容）"""
     key = hashlib.sha256(_SECRET_KEY.encode()).digest()
     return base64.urlsafe_b64encode(key)
+
+
+def _xor_decrypt(encrypted_b64: str) -> str:
+    """旧版 XOR 解密（仅用于向后兼容 enc: 前缀的旧密文）"""
+    cipher_key = _get_xor_cipher()
+    data = base64.urlsafe_b64decode(encrypted_b64)
+    xored = bytes(a ^ b for a, b in zip(data, (cipher_key * (len(data) // len(cipher_key) + 1))[:len(data)]))
+    return xored.decode("utf-8")
 
 
 def encrypt_api_key(plain: str) -> str:
     if not plain:
         return ""
-    cipher_key = _get_cipher()
+    if _HAS_FERNET:
+        f = _get_fernet()
+        token = f.encrypt(plain.encode("utf-8"))
+        return "fenc:" + token.decode("ascii")
+    # XOR 降级
+    cipher_key = _get_xor_cipher()
     data = plain.encode("utf-8")
     xored = bytes(a ^ b for a, b in zip(data, (cipher_key * (len(data) // len(cipher_key) + 1))[:len(data)]))
     return "enc:" + base64.urlsafe_b64encode(xored).decode()
 
 
 def decrypt_api_key(encrypted: str) -> str:
-    if not encrypted or not encrypted.startswith("enc:"):
-        return encrypted or ""
-    try:
-        cipher_key = _get_cipher()
-        data = base64.urlsafe_b64decode(encrypted[4:])
-        xored = bytes(a ^ b for a, b in zip(data, (cipher_key * (len(data) // len(cipher_key) + 1))[:len(data)]))
-        return xored.decode("utf-8")
-    except Exception:
-        return encrypted
+    if not encrypted:
+        return ""
+    # Fernet 密文（fenc: 前缀）
+    if encrypted.startswith("fenc:"):
+        if not _HAS_FERNET:
+            logger.error("[Security] Fernet 密文但 cryptography 未安装，无法解密")
+            return ""
+        try:
+            f = _get_fernet()
+            return f.decrypt(encrypted[5:].encode("ascii")).decode("utf-8")
+        except Exception:
+            return encrypted
+    # 旧版 XOR 密文（enc: 前缀）— 向后兼容
+    if encrypted.startswith("enc:"):
+        try:
+            return _xor_decrypt(encrypted[4:])
+        except Exception:
+            return encrypted
+    # 明文直接返回
+    return encrypted
 
 
 def mask_api_key(key: str) -> str:
@@ -104,9 +148,8 @@ def is_sensitive_request(text: str) -> bool:
     global _SECURITY_COMPILED
     if _SECURITY_COMPILED is None:
         _SECURITY_COMPILED = [re.compile(p, re.IGNORECASE) for p in SENSITIVE_PATTERNS]
-    text_lower = text.lower()
     for pattern in _SECURITY_COMPILED:
-        if pattern.search(text_lower):
+        if pattern.search(text):
             return True
     return False
 

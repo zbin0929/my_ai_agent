@@ -23,6 +23,7 @@ import time
 import re
 import logging
 import threading
+from copy import deepcopy
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict, field
 
@@ -52,8 +53,29 @@ class ChatSession:
     summary: Optional[str] = None
 
 
+def estimate_tokens(text: str) -> int:
+    """估算文本的 token 数（近似值）
+    
+    中文约 1 token ≈ 1.5 个字符，英文约 1 token ≈ 4 个字符。
+    这里使用混合估算：中文字符按 0.7 系数，其余按 0.25 系数。
+    """
+    if not text:
+        return 0
+    cn_chars = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
+    other_chars = len(text) - cn_chars
+    return int(cn_chars * 0.7 + other_chars * 0.25) + 1
+
+
+def estimate_message_tokens(msg: Dict[str, Any]) -> int:
+    """估算单条消息的 token 数（含 role 开销）"""
+    content = msg.get("content", "")
+    # role/metadata overhead ≈ 4 tokens
+    return estimate_tokens(content) + 4
+
+
 class MemoryManager:
     MAX_CONTEXT_MESSAGES = 50
+    MAX_CONTEXT_TOKENS = 12000    # token 预算（默认 12K，留余量给 system prompt + 回复）
     MAX_SESSION_MESSAGES = 5000
     SUMMARY_THRESHOLD = 100
     CACHE_TTL = 30
@@ -89,11 +111,11 @@ class MemoryManager:
             if time.time() - ts > self.CACHE_TTL:
                 del self._cache[session_id]
                 return None
-            return session
+            return deepcopy(session)
 
     def _cache_put(self, session_id: str, session: ChatSession) -> None:
         with self._cache_lock:
-            self._cache[session_id] = (session, time.time())
+            self._cache[session_id] = (deepcopy(session), time.time())
 
     def _cache_invalidate(self, session_id: str) -> None:
         with self._cache_lock:
@@ -189,9 +211,50 @@ class MemoryManager:
         session = self._resolve_session(session_id)
         return session.messages
 
-    def get_context_messages(self, session_id: str) -> List[Dict[str, Any]]:
+    def get_context_messages(self, session_id: str, max_tokens: Optional[int] = None) -> List[Dict[str, Any]]:
+        """获取上下文消息，按 token 预算动态裁剪
+        
+        优先保留最近的消息，如果有摘要则在开头注入摘要消息。
+        同时受 MAX_CONTEXT_MESSAGES 条数限制和 token 预算双重约束。
+        """
         session = self._resolve_session(session_id)
-        return session.messages[-self.MAX_CONTEXT_MESSAGES:]
+        budget = max_tokens or self.MAX_CONTEXT_TOKENS
+        
+        # 先按条数截断
+        candidates = session.messages[-self.MAX_CONTEXT_MESSAGES:]
+        
+        # 按 token 预算从后往前选取
+        selected: List[Dict[str, Any]] = []
+        used_tokens = 0
+        
+        # 如果有摘要，预留摘要 token
+        summary_msg = None
+        summary_tokens = 0
+        if session.summary:
+            summary_msg = {"role": "system", "content": f"[历史摘要] {session.summary}"}
+            summary_tokens = estimate_message_tokens(summary_msg)
+        
+        effective_budget = budget - summary_tokens
+        
+        for msg in reversed(candidates):
+            msg_tokens = estimate_message_tokens(msg)
+            if used_tokens + msg_tokens > effective_budget:
+                break
+            selected.append(msg)
+            used_tokens += msg_tokens
+        
+        selected.reverse()
+        
+        # 在开头注入摘要
+        if summary_msg and selected:
+            selected.insert(0, summary_msg)
+        
+        logger.debug(
+            f"[Memory] get_context_messages: session_id={session_id}, "
+            f"total={len(session.messages)}, selected={len(selected)}, "
+            f"tokens≈{used_tokens + summary_tokens}/{budget}"
+        )
+        return selected
 
     def get_summary(self, session_id: str) -> Optional[str]:
         session = self._resolve_session(session_id)
@@ -405,34 +468,21 @@ class MemoryManager:
                 break
         if not found:
             sessions.append(entry)
-        tmp_path = index_file + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(sessions, f, ensure_ascii=False, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, index_file)
+        self._atomic_write_json(index_file, sessions)
 
     def _write_index(self, sessions: List[Dict]) -> None:
         self._safe_write_json(self._index_file(), sessions)
 
     @staticmethod
-    def _safe_write_json(filepath: str, data: Any) -> None:
+    def _atomic_write_json(filepath: str, data: Any) -> None:
+        """原子写入 JSON（tmp+fsync+rename），不加文件锁"""
         tmp_path = filepath + ".tmp"
         try:
-            if HAS_FILELOCK:
-                lock = FileLock(filepath + ".lock", timeout=5)
-                with lock:
-                    with open(tmp_path, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.replace(tmp_path, filepath)
-            else:
-                with open(tmp_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_path, filepath)
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, filepath)
         except Exception as e:
             logger.error(f"写入文件失败: {filepath} - {e}")
             if os.path.exists(tmp_path):
@@ -442,6 +492,16 @@ class MemoryManager:
                     pass
             raise
 
+    @staticmethod
+    def _safe_write_json(filepath: str, data: Any) -> None:
+        """带文件锁的原子写入 JSON"""
+        if HAS_FILELOCK:
+            lock = FileLock(filepath + ".lock", timeout=5)
+            with lock:
+                MemoryManager._atomic_write_json(filepath, data)
+        else:
+            MemoryManager._atomic_write_json(filepath, data)
+
 
 _global_memory: Optional[MemoryManager] = None
 _global_memory_dir: Optional[str] = None
@@ -450,12 +510,14 @@ _global_memory_lock = threading.Lock()
 
 def get_memory_manager(data_dir: str = "data") -> MemoryManager:
     global _global_memory, _global_memory_dir
+    normalized_dir = os.path.abspath(data_dir)
     if _global_memory is not None:
+        if _global_memory_dir != normalized_dir:
+            logger.warning(f"[Memory] data_dir 不一致：已初始化={_global_memory_dir}，请求={normalized_dir}，使用已有实例")
         return _global_memory
     with _global_memory_lock:
         if _global_memory is not None:
             return _global_memory
-        normalized_dir = os.path.abspath(data_dir)
         _global_memory = MemoryManager(data_dir)
         _global_memory_dir = normalized_dir
         logger.info(f"[Memory] 创建全局单例，data_dir={normalized_dir}")

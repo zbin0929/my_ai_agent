@@ -2,6 +2,16 @@
 
 一个基于 **CrewAI** 的模块化多 Agent 协作系统，支持配置化定义智能体与工作流，提供命令行、API 和 Web 界面三种交互方式。
 
+## ✨ 最新更新 (v5.11.0)
+
+- **对话导出**：支持将会话导出为 Markdown 格式
+- **移动端适配**：响应式布局 + 抽屉式侧边栏
+- **用量统计面板**：查看会话/消息统计、常用模型和技能
+- **技能匹配优化**：同义词扩展，更智能的技能触发
+- **API Key 加密升级**：Fernet 加密，向后兼容旧密钥
+- **Token 动态裁剪**：自动管理上下文长度，避免超限
+- **chat_engine 模块化**：拆分为 worker_executor、fc_dispatcher、skill_executor
+
 ---
 
 ## 📁 项目结构
@@ -11,22 +21,25 @@ my_ai_agent/
 ├── main.py                 # 命令行入口
 ├── api/                    # FastAPI 后端服务
 │   ├── main.py            # API 入口
-│   └── routes/            # API 路由
+│   └── routes/            # API 路由 (chat, sessions, agents, skills, models, files, stats)
 ├── frontend/              # Next.js 前端界面
-│   ├── src/               # React 组件
-│   └── package.json
+│   ├── src/components/    # React 组件 (chat, sidebar, settings, office)
+│   ├── src/store/         # Zustand 状态管理
+│   └── src/lib/           # API 客户端
 ├── core/                  # 核心模块
-│   ├── agent_factory.py   # Agent 工厂
-│   ├── task_orchestrator.py # 任务编排器
-│   ├── llm_factory.py     # LLM 管理
-│   ├── chat_engine.py     # 对话引擎
-│   ├── memory.py          # 内存管理
-│   └── ...
+│   ├── chat_engine.py     # 对话引擎 (主路由)
+│   ├── worker_executor.py # Worker 执行器
+│   ├── fc_dispatcher.py   # FC 调度器
+│   ├── skill_executor.py  # 技能执行器
+│   ├── memory.py          # 内存管理 + Token 裁剪
+│   ├── security.py        # 安全模块 (Fernet 加密)
+│   ├── llm_factory.py     # LLM 工厂
+│   └── model_router.py    # 模型路由
+├── skills/                # 技能定义 (14个内置技能)
 ├── plugins/               # 插件目录
-├── skills/                # 技能定义
 ├── config/                # 配置文件
-├── requirements.txt       # Python 依赖
-└── deploy.sh              # 部署脚本
+├── tests/                 # 测试用例 (68 passed)
+└── data/                  # 数据目录 (sessions, uploads)
 ```
 
 ---
@@ -144,16 +157,20 @@ uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 主要接口：
-- `POST /api/chat` - 对话接口
+- `POST /api/chat` - 流式对话接口 (SSE)
 - `GET /api/health` - 健康检查
+- `GET /api/sessions` - 会话列表
+- `GET /api/sessions/{id}/export` - 导出会话为 Markdown
 - `GET /api/agents` - Agent 列表
 - `GET /api/models` - 可用模型列表
+- `GET /api/skills` - 技能列表
+- `GET /api/stats` - 用量统计
 
 ---
 
 ## 🎨 前端界面
 
-基于 **Next.js + React + Tailwind CSS** 的现代化 Web 界面：
+基于 **Next.js + React + Tailwind CSS + Zustand** 的现代化 Web 界面：
 
 ```bash
 cd frontend
@@ -162,18 +179,27 @@ npm run dev          # 开发模式 http://localhost:3000
 npm run build        # 生产构建
 ```
 
+### 主要功能
+- **聊天界面**：流式输出、思考过程展示、文件上传
+- **会话管理**：置顶、重命名、导出 Markdown
+- **设置面板**：Agent 管理、技能配置、模型设置、用量统计
+- **办公室视图**：像素风格的 Agent 团队可视化
+- **移动端适配**：响应式布局 + 抽屉侧边栏
+- **深色模式**：自动跟随系统或手动切换
+- **中英双语**：完整的国际化支持
+
 ---
 
 ## 📚 项目模块
 
 | 模块 | 说明 |
 |------|------|
-| `core/` | 核心引擎（Agent、任务编排、LLM、内存） |
-| `api/` | FastAPI 服务端 |
-| `frontend/` | Next.js 前端 |
-| `plugins/` | 插件扩展目录 |
-| `skills/` | 技能定义目录 |
-| `deploy/` | 部署配置 |
+| `core/` | 核心引擎（chat_engine、memory、security、llm_factory） |
+| `api/` | FastAPI 服务端（7个路由模块） |
+| `frontend/` | Next.js 前端（Zustand 状态管理） |
+| `skills/` | 14个内置技能（翻译、绘图、TTS、搜索等） |
+| `plugins/` | 插件扩展（browser、code_executor、bot） |
+| `tests/` | 测试用例（68 passed） |
 
 ---
 
@@ -192,8 +218,23 @@ npm run build        # 生产构建
 | `ZHIPU_API_KEY` | 智谱 AI API Key | 是 |
 | `OPENAI_API_KEY` | OpenAI API Key | 可选 |
 | `DEEPSEEK_API_KEY` | DeepSeek API Key | 可选 |
-| `ENCRYPTION_KEY` | 数据加密密钥 | 是 |
+| `ENCRYPTION_KEY` | API Key 加密密钥 (Fernet) | 推荐 |
+| `ADMIN_TOKEN` | 管理接口认证令牌 | 推荐 |
 | `LOG_LEVEL` | 日志级别 (DEBUG/INFO/WARNING/ERROR) | 否 |
+
+---
+
+## 🧪 测试
+
+```bash
+# 运行所有测试
+pytest tests/ -v
+
+# 运行核心功能测试
+pytest tests/test_p0_features.py -v
+```
+
+当前测试覆盖：68 passed（安全、加密、内存、技能匹配、Token 估算等）
 
 ---
 

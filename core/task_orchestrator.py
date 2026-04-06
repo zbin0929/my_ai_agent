@@ -57,6 +57,12 @@ class TaskOrchestrator:
         self.config = config
         self.agent_factory = agent_factory
         
+        # 预索引：task_id -> task_config（O(1) 查找）
+        self._task_configs: Dict[str, Dict] = {}
+        for t in config.get("tasks", []):
+            if "id" in t:
+                self._task_configs[t["id"]] = t
+        
         # 任务对象缓存：task_id -> Task 实例
         self._tasks: Dict[str, Task] = {}
         
@@ -147,11 +153,8 @@ class TaskOrchestrator:
         return tasks
     
     def _find_task_config(self, task_id: str) -> Optional[Dict]:
-        """查找任务配置"""
-        for task in self.config.get("tasks", []):
-            if task.get("id") == task_id:
-                return task
-        return None
+        """查找任务配置（O(1) 预索引查找）"""
+        return self._task_configs.get(task_id)
     
     def _resolve_context(self, context_ids: List[str]) -> List[Task]:
         """
@@ -300,6 +303,7 @@ class TaskOrchestrator:
         """
         mode_map = {
             "sequential": Process.sequential,
+            "parallel": Process.sequential,
             "hierarchical": Process.hierarchical,
         }
         
@@ -307,6 +311,8 @@ class TaskOrchestrator:
         if not process:
             logger.warning(f"未知的执行模式 '{mode}'，使用默认的顺序执行")
             process = Process.sequential
+        elif mode == "parallel":
+            logger.info("parallel 模式：CrewAI 尚不原生支持 parallel Process，将使用 sequential 代替")
         
         return process
     

@@ -33,19 +33,31 @@ async def list_agents():
     return {"agents": [_agent_with_capabilities(a) for a in agents]}
 
 
+_skills_loaded = False
+_skills_load_lock = __import__("threading").Lock()
+
+
+def _ensure_skills_loaded():
+    global _skills_loaded
+    if _skills_loaded:
+        return
+    with _skills_load_lock:
+        if _skills_loaded:
+            return
+        from skills import set_data_dir, load_builtin_skills, load_custom_skills, load_skill_configs, load_disabled
+        set_data_dir(DATA_DIR)
+        load_builtin_skills()
+        load_custom_skills()
+        load_skill_configs()
+        load_disabled()
+        _skills_loaded = True
+
+
 @router.get("/available-skills")
 async def get_available_skills():
-    from skills import (
-        set_data_dir, load_builtin_skills, load_custom_skills,
-        load_skill_configs, load_disabled, get_skills, get_skill_configs,
-        get_disabled_skills,
-    )
+    from skills import get_skills, get_skill_configs, get_disabled_skills
 
-    set_data_dir(DATA_DIR)
-    load_builtin_skills()
-    load_custom_skills()
-    load_skill_configs()
-    load_disabled()
+    _ensure_skills_loaded()
 
     disabled = get_disabled_skills()
 

@@ -23,7 +23,7 @@
     python main.py --validate
 
 作者：AI Agent Team
-版本：1.0.0
+版本：5.11.0
 """
 
 import sys
@@ -55,9 +55,11 @@ def setup_logging(log_level: str = "INFO") -> None:
         日志会同时输出到控制台和文件
         文件日志保存在 logs/ 目录下
     """
-    # 创建日志目录
+    # 创建日志目录（使用项目根目录的绝对路径，避免受工作目录影响）
     import os
-    os.makedirs("logs", exist_ok=True)
+    _project_root = os.path.dirname(os.path.abspath(__file__))
+    _log_dir = os.path.join(_project_root, "logs")
+    os.makedirs(_log_dir, exist_ok=True)
     
     # 配置根日志记录器
     logging.basicConfig(
@@ -68,7 +70,7 @@ def setup_logging(log_level: str = "INFO") -> None:
             # 控制台输出
             logging.StreamHandler(sys.stdout),
             # 文件输出
-            logging.FileHandler("logs/agent_system.log", encoding="utf-8"),
+            logging.FileHandler(os.path.join(_log_dir, "agent_system.log"), encoding="utf-8"),
         ]
     )
 

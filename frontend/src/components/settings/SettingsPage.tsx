@@ -8,8 +8,9 @@ import { api } from "@/lib/api";
 import { AgentManager } from "./AgentManager";
 import { ModelConfig } from "./ModelConfig";
 import { SkillManager } from "./SkillManager";
+import { StatsPanel } from "./StatsPanel";
 
-type TabKey = "agents" | "models" | "skills";
+type TabKey = "agents" | "models" | "skills" | "stats";
 
 export function SettingsPage() {
   const { t } = useI18n();
@@ -20,6 +21,7 @@ export function SettingsPage() {
     { key: "agents", labelKey: "tabAgents", icon: "🤖" },
     { key: "skills", labelKey: "tabSkills", icon: "⚡" },
     { key: "models", labelKey: "tabModels", icon: "🔑" },
+    { key: "stats", labelKey: "tabStats", icon: "📊" },
   ];
 
   useEffect(() => {
@@ -64,6 +66,7 @@ export function SettingsPage() {
           {activeTab === "agents" && <AgentManager />}
           {activeTab === "skills" && <SkillManager />}
           {activeTab === "models" && <ModelConfig />}
+          {activeTab === "stats" && <StatsPanel />}
         </div>
       </div>
     </div>
