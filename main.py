@@ -23,7 +23,7 @@
     python main.py --validate
 
 作者：AI Agent Team
-版本：5.11.0
+版本：5.14.0
 """
 
 import sys

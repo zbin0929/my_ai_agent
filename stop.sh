@@ -10,7 +10,7 @@ PID_DIR="$PROJECT_ROOT/.pids"
 BACKEND_PID_FILE="$PID_DIR/backend.pid"
 FRONTEND_PID_FILE="$PID_DIR/frontend.pid"
 
-echo "Stopping GymClaw v5.15.0..."
+echo "Stopping GymClaw v5.14.0..."
 
 # 强制杀掉占用端口的进程
 kill_port() {

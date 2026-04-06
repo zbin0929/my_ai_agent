@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 # [优化] 速率限制器 — 防止 API 滥用，默认每分钟 60 次请求
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
-APP_VERSION = "5.11.0"
+APP_VERSION = "5.14.0"
 
 # [安全加固] Admin Token 认证 — 保护配置修改类接口
 _ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")

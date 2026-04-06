@@ -69,7 +69,7 @@ if [ "$1" = "restart" ]; then
     sleep 2
 fi
 
-echo "=== Starting GymClaw v5.15.0 (Sprite Office Edition) ==="
+echo "=== Starting GymClaw v5.14.0 ==="
 echo ""
 
 # --- 检测 Python 命令 ---

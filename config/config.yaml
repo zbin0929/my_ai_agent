@@ -1,6 +1,6 @@
 system:
   name: 多Agent智能体系统
-  version: 5.11.0
+  version: 5.14.0
   log_level: INFO
   log_dir: /logs
   data_dir: /data
