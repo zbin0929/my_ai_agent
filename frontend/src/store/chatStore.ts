@@ -12,7 +12,7 @@
  */
 
 import { create, type StateCreator } from "zustand";
-import type { Message, Session } from "@/types";
+import type { Message, Session, FileInfo } from "@/types";
 
 // ==================== Session Slice ====================
 
@@ -20,10 +20,11 @@ interface SessionSlice {
   sessions: Session[];
   currentSessionId: string | null;
   pendingMessage: string | null;
+  pendingFiles: FileInfo[] | null;
   viewMode: "chat" | "office";
   setSessions: (sessions: Session[]) => void;
   setCurrentSession: (id: string | null) => void;
-  setPendingMessage: (msg: string | null) => void;
+  setPendingMessage: (msg: string | null, files?: FileInfo[] | null) => void;
   setViewMode: (mode: "chat" | "office") => void;
   updateSessionTitle: (id: string, title: string) => void;
   removeSession: (id: string) => void;
@@ -35,10 +36,11 @@ const createSessionSlice: StateCreator<ChatState, [], [], SessionSlice> = (set) 
   sessions: [],
   currentSessionId: null,
   pendingMessage: null,
+  pendingFiles: null,
   viewMode: "chat",
   setSessions: (sessions) => set({ sessions }),
   setCurrentSession: (id) => set({ currentSessionId: id }),
-  setPendingMessage: (msg) => set({ pendingMessage: msg }),
+  setPendingMessage: (msg, files) => set({ pendingMessage: msg, pendingFiles: files ?? null }),
   setViewMode: (mode) => set({ viewMode: mode }),
   updateSessionTitle: (id, title) =>
     set((state) => ({

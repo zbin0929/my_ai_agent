@@ -62,10 +62,14 @@ def build_manager_system_prompt(agent_config, get_agent_manager_fn, ensure_skill
         "1. 当用户请求可以通过工具完成时，调用对应的工具\n"
         "2. **严禁同时调用多个工具** — 每次请求只能调用一个工具\n"
         "3. 精准匹配用户意图，不要添加用户没有要求的功能\n"
+        "4. **文档分析优先**：当用户上传了文件并要求分析/总结/理解时，使用 summarize_document 工具\n"
+        "5. **翻译仅限明确请求**：只有用户明确说「翻译」「translate」时才调用翻译工具\n"
         "\n## 示例\n"
-        "- 用户说「画一只狗」→ 只调用 generate_image 或 assign_to_创意工坊，绝不调用 text_to_speech\n"
-        "- 用户说「朗读这段话」→ 只调用 text_to_speech，绝不调用其他工具\n"
-        "- 用户说「画图并朗读」→ 只调用 generate_image（先完成一个，用户可以再要求朗读）\n"
+        "- 用户上传文件说「分析这个文档」→ 调用 summarize_document\n"
+        "- 用户上传文件说「帮我总结」→ 调用 summarize_document\n"
+        "- 用户说「翻译这段话」→ 调用 translate_text\n"
+        "- 用户说「画一只狗」→ 调用 generate_image\n"
+        "- 用户说「朗读这段话」→ 调用 text_to_speech\n"
     )
 
     if lang == "zh":
@@ -130,25 +134,44 @@ async def stream_with_fc(
             candidate = f"assign_to_{safe_name}_{idx + 1}"
         role_desc = w.role or w.description or "通用助手"
         desc = f"将任务分配给员工「{w.name}」处理。{w.name}的职责：{role_desc}。使用的模型：{w.model_id}。"
+        
+        # 构建技能枚举和描述
+        skill_enum = []
+        skill_desc_parts = []
         if w.skills:
             agent_skills = get_skills_for_agent(w.skills)
             if agent_skills:
+                for sk in agent_skills:
+                    skill_enum.append(sk["id"])
+                    skill_desc_parts.append(f"{sk['id']}({sk['name']})")
                 desc += "擅长技能：" + "、".join(s["name"] for s in agent_skills) + "。"
+        
+        # 构建工具参数
+        tool_params = {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": f"要交给{w.name}处理的任务描述",
+                },
+            },
+            "required": ["task"],
+        }
+        
+        # 如果员工有多个技能，添加 skill 参数让主管指定
+        if len(skill_enum) > 1:
+            tool_params["properties"]["skill"] = {
+                "type": "string",
+                "description": f"指定{w.name}使用的技能：" + "、".join(skill_desc_parts),
+                "enum": skill_enum,
+            }
+        
         worker_tool_definitions.append({
             "type": "function",
             "function": {
                 "name": candidate,
                 "description": desc,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "task": {
-                            "type": "string",
-                            "description": f"要交给{w.name}处理的任务描述",
-                        },
-                    },
-                    "required": ["task"],
-                },
+                "parameters": tool_params,
             },
         })
         worker_map[candidate] = w
@@ -199,12 +222,13 @@ async def stream_with_fc(
                 if func_name.startswith("assign_to_") and func_name in worker_map:
                     worker = worker_map[func_name]
                     task_desc = func_args.get("task", clean_input)
+                    specified_skill = func_args.get("skill")  # 主管指定的技能
                     yield json.dumps({"type": "worker", "worker_name": worker.name, "worker_model": worker.model_id}, ensure_ascii=False) + "\n"
 
                     agents_involved.append({"name": worker.name, "model_id": worker.model_id, "role": "worker"})
 
                     w_result = {}
-                    async for chunk in stream_worker_content(worker, task_desc, enable_thinking=enable_thinking, enable_search=enable_search, lang=lang, result=w_result):
+                    async for chunk in stream_worker_content(worker, task_desc, enable_thinking=enable_thinking, enable_search=enable_search, lang=lang, result=w_result, specified_skill=specified_skill, files=files):
                         yield chunk
                     full_response += w_result.get("response", "")
                     full_thinking += w_result.get("thinking", "")

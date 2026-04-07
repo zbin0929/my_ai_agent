@@ -185,9 +185,11 @@ export function InputBar() {
     }
     pendingMessageSentRef.current = true;
     const text = pendingMessage;
+    const state = useChatStore.getState();
+    const pendingFileInfos = state.pendingFiles;
+    const pendingFileIds = pendingFileInfos?.map((f) => f.file_id);
     setPendingMessage(null);
 
-    const state = useChatStore.getState();
     const shouldAutoTitle = state.messages.length === 0;
     const userMsgId = generateUniqueId();
 
@@ -201,6 +203,7 @@ export function InputBar() {
       role: "user" as const,
       content: text,
       timestamp: new Date().toISOString(),
+      files: pendingFileInfos || undefined,
     });
 
     state.setIsStreaming(true);
@@ -224,8 +227,8 @@ export function InputBar() {
         onDoneBase();
         pendingMessageSentRef.current = false;
       },
-      undefined,
-      undefined,
+      pendingFileIds,
+      pendingFileInfos || undefined,
       state.chatMode,
       ac.signal,
       state.enableSearch

@@ -43,8 +43,13 @@ def _resolve_thinking_agent(agent_config):
     return agent_config
 
 
-async def stream_worker_content(worker_agent, task_input: str, enable_thinking: bool = False, enable_search: bool = False, lang: str = "zh", result: dict = None) -> AsyncGenerator[str, None]:
-    """执行员工内容生成（runner 或 LLM），yield SSE 事件字符串。累计文本存入 result dict。"""
+async def stream_worker_content(worker_agent, task_input: str, enable_thinking: bool = False, enable_search: bool = False, lang: str = "zh", result: dict = None, specified_skill: str = None, files: list = None) -> AsyncGenerator[str, None]:
+    """执行员工内容生成（runner 或 LLM），yield SSE 事件字符串。累计文本存入 result dict。
+    
+    Args:
+        specified_skill: 主管指定的技能 ID，如果提供则优先使用该技能
+        files: 上传的文件 ID 列表
+    """
     from skills import get_tool_schemas_by_skill_ids, get_skills_for_agent, execute_tool_by_name
 
     full_response = ""
@@ -55,12 +60,38 @@ async def stream_worker_content(worker_agent, task_input: str, enable_thinking: 
         worker_skill_ids = worker_agent.skills or []
         if worker_skill_ids:
             from skills import match_skill_for_agent
-            # 根据任务内容匹配最相关的技能，而不是执行所有技能
-            matched_skill = match_skill_for_agent(task_input, worker_skill_ids)
+            matched_skill = None
+            
+            # 优先使用主管指定的技能
+            if specified_skill and specified_skill in worker_skill_ids:
+                agent_skills = get_skills_for_agent(worker_skill_ids)
+                for sk in agent_skills:
+                    if sk.get("id") == specified_skill:
+                        matched_skill = sk
+                        logger.info(f"[worker] 使用主管指定的技能: {specified_skill}")
+                        break
+            
+            # 如果没有指定或指定的技能不存在，使用关键词匹配
+            if not matched_skill:
+                matched_skill = match_skill_for_agent(task_input, worker_skill_ids)
+            
+            # 如果还是没有匹配到，尝试智能推断
+            if not matched_skill:
+                agent_skills = get_skills_for_agent(worker_skill_ids)
+                doc_keywords = ["分析", "总结", "摘要", "归纳", "文档", "文件", "报告"]
+                if any(kw in task_input for kw in doc_keywords):
+                    for sk in agent_skills:
+                        if sk.get("id") == "doc_summary":
+                            matched_skill = sk
+                            break
+                # 如果还是没匹配，使用第一个技能作为默认
+                if not matched_skill and agent_skills:
+                    matched_skill = agent_skills[0]
             
             if matched_skill:
                 tool_schema = matched_skill.get("tool_schema")
-                if tool_schema:
+                handler = matched_skill.get("handler")
+                if tool_schema and handler:
                     tool_name = tool_schema.get("function", {}).get("name", "")
                     tool_args = {}
                     params = tool_schema.get("function", {}).get("parameters", {}).get("properties", {})
@@ -76,7 +107,9 @@ async def stream_worker_content(worker_agent, task_input: str, enable_thinking: 
                             tool_args[first_param] = task_input
 
                     yield json.dumps({"type": "tool_start", "tool_name": tool_name}, ensure_ascii=False) + "\n"
-                    tool_result = await asyncio.to_thread(execute_tool_by_name, tool_name, tool_args)
+                    # 直接调用 handler 并传递 files 上下文
+                    context = {"tool_args": tool_args, "files": files or [], "skill_id": matched_skill.get("id")}
+                    tool_result = await asyncio.to_thread(handler, task_input, context)
                     result_msg = tool_result.get("message", "")
                     _t, _c = _parse_thinking(result_msg)
                     if _t and enable_thinking:
@@ -85,37 +118,6 @@ async def stream_worker_content(worker_agent, task_input: str, enable_thinking: 
                     if _c:
                         yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
                         full_response += _c
-            else:
-                # 没有匹配到技能，使用第一个技能作为默认
-                agent_skills = get_skills_for_agent(worker_skill_ids)
-                if agent_skills:
-                    sk = agent_skills[0]
-                    tool_schema = sk.get("tool_schema")
-                    if tool_schema:
-                        tool_name = tool_schema.get("function", {}).get("name", "")
-                        tool_args = {}
-                        params = tool_schema.get("function", {}).get("parameters", {}).get("properties", {})
-                        if "prompt" in params:
-                            tool_args["prompt"] = task_input
-                        elif "text" in params:
-                            tool_args["text"] = task_input
-                        elif "url" in params:
-                            tool_args["url"] = task_input
-                        else:
-                            first_param = next(iter(params), None)
-                            if first_param:
-                                tool_args[first_param] = task_input
-
-                        yield json.dumps({"type": "tool_start", "tool_name": tool_name}, ensure_ascii=False) + "\n"
-                        tool_result = await asyncio.to_thread(execute_tool_by_name, tool_name, tool_args)
-                        result_msg = tool_result.get("message", "")
-                        _t, _c = _parse_thinking(result_msg)
-                        if _t and enable_thinking:
-                            yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
-                            full_thinking += _t
-                        if _c:
-                            yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
-                            full_response += _c
         else:
             full_response = f"{worker_agent.name} 没有绑定任何技能" if lang == "zh" else f"{worker_agent.name} has no skills assigned"
             yield json.dumps({"type": "content", "content": full_response}, ensure_ascii=False) + "\n"

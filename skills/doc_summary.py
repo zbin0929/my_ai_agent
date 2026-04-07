@@ -43,13 +43,31 @@ def _read_file_content(filepath: str) -> str:
 def _find_uploaded_files(context: Dict[str, Any]) -> list:
     """从上下文中查找上传的文件路径"""
     files = []
+    upload_dir = os.path.join(project_root, "data", "uploads")
     if context:
         for key in ("files", "file_paths"):
             if context.get(key):
-                files.extend(context[key])
+                for f in context[key]:
+                    # 如果是文件 ID（不是完整路径），转换为完整路径
+                    if not os.path.isabs(f):
+                        full_path = os.path.join(upload_dir, f)
+                        if os.path.exists(full_path):
+                            files.append(full_path)
+                        else:
+                            files.append(f)
+                    else:
+                        files.append(f)
         tool_args = context.get("tool_args", {})
         if tool_args.get("file_path"):
-            files.append(tool_args["file_path"])
+            fp = tool_args["file_path"]
+            if not os.path.isabs(fp):
+                full_path = os.path.join(upload_dir, fp)
+                if os.path.exists(full_path):
+                    files.append(full_path)
+                else:
+                    files.append(fp)
+            else:
+                files.append(fp)
     return files
 
 
@@ -80,23 +98,31 @@ def _build_prompt(mode: str, filename: str = "") -> str:
         base += f"（文件名: {filename}）"
     base += "。\n\n"
 
+    format_rules = (
+        "\n\n**格式要求**：\n"
+        "- 使用清晰的 Markdown 格式\n"
+        "- 标题层级分明（## 和 ### 为主）\n"
+        "- 要点使用简洁的列表\n"
+        "- 避免过长的段落，保持简洁\n"
+        "- 重要内容用 **加粗** 标注"
+    )
+
     if mode == "keypoints":
-        return base + "请提取文档的关键信息要点，用编号列表输出，每个要点一句话概括。"
+        return base + "请提取文档的关键信息要点，用编号列表输出，每个要点一句话概括。" + format_rules
     elif mode == "extract":
-        return base + "请从文档中提取结构化信息（如日期、数字、人名、地点、金额等），用表格或列表形式输出。"
+        return base + "请从文档中提取结构化信息（如日期、数字、人名、地点、金额等），用表格或列表形式输出。" + format_rules
     elif mode == "analysis":
-        return base + "请对文档内容进行深度分析，包括：主题、结构、核心观点、数据趋势、潜在问题，用 Markdown 格式输出。"
+        return base + "请对文档内容进行深度分析，包括：主题、结构、核心观点、数据趋势、潜在问题。" + format_rules
     elif mode == "compare":
-        return base + "请对文档中的内容进行对比分析，找出异同点，用表格形式呈现。"
+        return base + "请对文档中的内容进行对比分析，找出异同点，用表格形式呈现。" + format_rules
     else:
         return base + (
-            "请对文档进行结构化总结，包括：\n"
-            "1. **一句话摘要**（不超过50字）\n"
-            "2. **核心要点**（3-5个要点）\n"
-            "3. **详细内容**（按文档结构展开）\n"
-            "4. **结论/建议**（如适用）\n\n"
-            "用 Markdown 格式输出。"
-        )
+            "请对文档进行结构化总结：\n\n"
+            "## 一句话摘要\n（不超过50字）\n\n"
+            "## 核心要点\n（3-5个要点，每个一句话）\n\n"
+            "## 详细内容\n（按文档结构分节展开，每节简洁明了）\n\n"
+            "## 结论/建议\n（如适用）"
+        ) + format_rules
 
 
 def summarize_document(content: str, mode: str = "summary", filename: str = "", question: str = "") -> Dict[str, Any]:
@@ -142,7 +168,7 @@ def summarize_document(content: str, mode: str = "summary", filename: str = "", 
     description="对上传的文档进行结构化总结、要点提取、深度分析",
     triggers=["总结文档", "文档总结", "帮我总结", "归纳一下", "提取要点",
               "文档分析", "分析文档", "总结一下", "帮我归纳", "文件总结",
-              "摘要", "总结报告"],
+              "摘要", "总结报告", "分析一下", "分析这个", "分析这份", "请分析"],
     icon="file",
     examples=[
         "帮我总结一下这份文档的要点",

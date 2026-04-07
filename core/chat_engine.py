@@ -147,6 +147,8 @@ async def _stream_normal_chat(agent_config, clean_input: str, original_input: st
         system_prompt += (
             "\n**严格规则：每次只能调用一个工具**\n"
             "- 精准匹配用户意图，不要添加用户没有要求的功能\n"
+            "- **文档分析优先**：当用户上传了文件并要求分析/总结/理解时，使用 summarize_document\n"
+            "- **翻译仅限明确请求**：只有用户明确说「翻译」「translate」时才调用翻译工具\n"
             "- 用户说「画一只狗」→ 只调用 generate_image，绝不调用 text_to_speech\n"
         )
     context_messages = memory.get_context_messages(session_id)
