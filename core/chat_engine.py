@@ -128,8 +128,11 @@ async def _generate_title(agent_config, user_input: str, ai_response: str, lang:
 async def _stream_normal_chat(agent_config, clean_input: str, original_input: str, session_id: str, memory, files, file_infos, enable_thinking=False, enable_search=False, lang="zh", tools=None) -> AsyncGenerator[str, None]:
     import time as _time
     _t0 = _time.monotonic()
+    _original_model = agent_config.model_id
     if enable_thinking:
         agent_config = _resolve_thinking_agent(agent_config)
+        if agent_config.model_id != _original_model:
+            logger.warning(f"[normal_chat] 思考模式模型切换: {_original_model} → {agent_config.model_id} (原模型不支持thinking)")
     system_prompt = build_system_prompt(agent_config.name, lang=lang, enable_thinking=enable_thinking)
     if tools:
         system_prompt += (
@@ -156,12 +159,15 @@ async def _stream_normal_chat(agent_config, clean_input: str, original_input: st
     full_thinking_parts: list[str] = []
     tool_call_chunks = []
 
+    # [优化] 将用户消息保存与 LLM 调用并行执行，减少首字节延迟
     _t1 = _time.monotonic()
-    memory.add_message("user", original_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
-    logger.info(f"[normal_chat] add_message耗时: {(_time.monotonic()-_t1)*1000:.0f}ms")
+    _save_user_msg_task = asyncio.create_task(
+        asyncio.to_thread(memory.add_message, "user", original_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
+    )
 
     try:
         _t2 = _time.monotonic()
+        logger.info(f"[normal_chat] LLM请求发起 (add_message已异步, 准备耗时: {(_t2-_t0)*1000:.0f}ms)")
         _first_chunk_logged = False
         async for chunk in _stream_llm_real(messages, agent_config, tools=tools, enable_search=enable_search, enable_thinking=enable_thinking):
             if not _first_chunk_logged:
@@ -210,6 +216,10 @@ async def _stream_normal_chat(agent_config, clean_input: str, original_input: st
         full_response = "".join(full_response_parts)
         full_thinking = "".join(full_thinking_parts)
 
+        # [优化] 确保用户消息已保存完成，再保存助手消息（防止并发写入丢失）
+        await _save_user_msg_task
+        logger.info(f"[normal_chat] add_message(user)异步完成, 耗时: {(_time.monotonic()-_t1)*1000:.0f}ms")
+
         ai_meta = {}
         if full_thinking:
             ai_meta["thinking"] = full_thinking
@@ -229,6 +239,11 @@ async def _stream_normal_chat(agent_config, clean_input: str, original_input: st
 
     except Exception as e:
         logger.error(f"流式对话失败: {e}")
+        # 确保异步保存任务完成，避免孤立任务
+        try:
+            await _save_user_msg_task
+        except Exception:
+            pass
         yield json.dumps({"type": "error", "content": friendly_error_message(e, lang)}, ensure_ascii=False) + "\n"
 
 
@@ -364,7 +379,7 @@ async def stream_message(
     if _model_supports_tool_use(agent.model_id):
         workers = manager.list_workers()
         if workers:
-            logger.info(f"[路径3-FC] 检测到 {len(workers)} 个员工，走 FC 调度")
+            logger.info(f"[路径3-FC] 检测到 {len(workers)} 个员工，走 FC 调度, 路由耗时: {(_time.monotonic()-_t0)*1000:.0f}ms")
             async for chunk in _stream_with_fc(
                 agent, clean_input, user_input, session_id, memory, files, file_infos,
                 get_agent_manager_fn=_get_agent_manager, ensure_skills_fn=_ensure_skills,
@@ -375,11 +390,13 @@ async def stream_message(
             return
         else:
             # 无员工但模型支持 tool_use → 轻量 FC：普通对话 + 技能工具
+            _ts = _time.monotonic()
             _ensure_skills()
+            _skill_load_ms = (_time.monotonic() - _ts) * 1000
             from skills import get_all_tool_schemas
             skill_tools = get_all_tool_schemas()
             if skill_tools:
-                logger.info(f"[路径3-FC轻量] 无员工，注入 {len(skill_tools)} 个技能工具到普通对话")
+                logger.info(f"[路径3-FC轻量] 无员工，注入 {len(skill_tools)} 个技能工具, 技能加载耗时: {_skill_load_ms:.0f}ms, 总路由耗时: {(_time.monotonic()-_t0)*1000:.0f}ms")
                 async for chunk in _stream_normal_chat(agent, clean_input, user_input, session_id, memory, files, file_infos, enable_thinking=enable_thinking, enable_search=search_via_tool, lang=lang, tools=skill_tools):
                     yield chunk
                 return

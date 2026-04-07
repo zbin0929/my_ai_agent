@@ -84,9 +84,14 @@ async def stream_with_fc(
     enable_search=False, enable_thinking=False, lang="zh",
 ) -> AsyncGenerator[str, None]:
     """主管 FC 模式 — 通过 Function Calling 调度员工和工具"""
+    import time as _time
+    _t0 = _time.monotonic()
     logger.info(f"[FC调度] 开始执行, agent={agent_config.name}, enable_thinking={enable_thinking}, clean_input={clean_input[:50]}")
+    _original_model = agent_config.model_id
     if enable_thinking:
         agent_config = _resolve_thinking_agent(agent_config)
+        if agent_config.model_id != _original_model:
+            logger.warning(f"[FC调度] 思考模式模型切换: {_original_model} → {agent_config.model_id}")
     from skills import get_unassigned_tool_schemas, get_tool_schemas_by_skill_ids, execute_tool_by_name, get_skills_for_agent
 
     ensure_skills_fn()
@@ -97,7 +102,10 @@ async def stream_with_fc(
     user_content = await _build_file_content(files, clean_input, upload_dir)
     messages = _build_chat_messages(system_prompt, context_messages, user_content)
 
-    memory.add_message("user", original_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
+    # [优化] 将用户消息保存与后续处理并行执行
+    _save_user_msg_task = asyncio.create_task(
+        asyncio.to_thread(memory.add_message, "user", original_input, session_id=session_id, metadata={"files": file_infos} if file_infos else None)
+    )
 
     manager = get_agent_manager_fn()
     workers = manager.list_workers()
@@ -153,7 +161,7 @@ async def stream_with_fc(
     tool_call_chunks = []
 
     try:
-        logger.info(f"[FC调度] 调用LLM, model={agent_config.model_id}")
+        logger.info(f"[FC调度] 调用LLM, model={agent_config.model_id}, 准备耗时: {(_time.monotonic()-_t0)*1000:.0f}ms")
         async for chunk in _stream_llm_real(messages, agent_config, tools=tools if tools else None, enable_search=enable_search, enable_thinking=enable_thinking):
             chunk_type = chunk.get("type", "")
             chunk_content = chunk.get("content", "")
@@ -224,6 +232,8 @@ async def stream_with_fc(
             ai_meta["thinking"] = full_thinking
         if len(agents_involved) > 1:
             ai_meta["agents"] = agents_involved
+        # [优化] 确保用户消息已保存完成
+        await _save_user_msg_task
         memory.add_message("assistant", full_response, session_id=session_id, metadata=ai_meta if ai_meta else None)
 
         msg_count = len(memory.get_messages(session_id))
@@ -243,4 +253,8 @@ async def stream_with_fc(
 
     except Exception as e:
         logger.error(f"FC 流式对话失败: {e}")
+        try:
+            await _save_user_msg_task
+        except Exception:
+            pass
         yield json.dumps({"type": "error", "content": friendly_error_message(e, lang)}, ensure_ascii=False) + "\n"

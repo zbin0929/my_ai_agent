@@ -119,17 +119,47 @@ async def general_error_handler(request: Request, exc: Exception):
 
 # ==================== 请求日志中间件 ====================
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """记录请求耗时和状态码，便于性能分析"""
-    start = time.time()
-    response = await call_next(request)
-    duration_ms = (time.time() - start) * 1000
-    if duration_ms > 1000:  # 超过 1 秒的慢请求特别标记
-        logger.warning(f"SLOW {request.method} {request.url.path} → {response.status_code} ({duration_ms:.0f}ms)")
-    else:
-        logger.debug(f"{request.method} {request.url.path} → {response.status_code} ({duration_ms:.0f}ms)")
-    return response
+class RequestLoggingMiddleware:
+    """
+    原生 ASGI 请求日志中间件
+    
+    替代 @app.middleware("http")（BaseHTTPMiddleware），因为 BaseHTTPMiddleware
+    的 call_next() 会通过内部队列中转响应体，导致 SSE/StreamingResponse 被缓冲，
+    流式数据无法实时推送到客户端。
+    
+    原生 ASGI 中间件直接透传响应体，不干扰流式输出。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start = time.time()
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+        status_code = 0
+
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 0)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            duration_ms = (time.time() - start) * 1000
+            if duration_ms > 1000:
+                logger.warning(f"SLOW {method} {path} → {status_code} ({duration_ms:.0f}ms)")
+            else:
+                logger.debug(f"{method} {path} → {status_code} ({duration_ms:.0f}ms)")
+
+
+app.add_middleware(RequestLoggingMiddleware)
 
 
 # ==================== 跨域配置 ====================
