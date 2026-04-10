@@ -89,6 +89,11 @@ const zh: Record<string, string> = {
   deleteConfirm: "确定删除？",
   deleteAgentTitle: "删除 Agent",
   deleteAgentDesc: "确定要删除该 Agent 吗？此操作不可撤销。",
+  agentResting: "休息中",
+  agentEnabled: "员工已启用",
+  agentDisabled: "员工已休息",
+  agentSetRest: "设为休息",
+  agentSetActive: "启用员工",
   deleteModelTitle: "删除模型",
   deleteModelDesc: "确定要删除该自定义模型吗？此操作不可撤销。",
   deleteFailed: "删除失败",
@@ -231,6 +236,11 @@ const zh: Record<string, string> = {
   errorBoundaryTitle: "页面出现错误",
   errorBoundaryMessage: "抱歉，页面遇到了一个问题。请刷新页面重试。",
   errorBoundaryReload: "刷新页面",
+  voiceInput: "语音输入",
+  voiceRecording: "录音中...",
+  voiceRecognizing: "识别中...",
+  voiceError: "语音识别失败",
+  voiceNotSupported: "浏览器不支持语音录制",
 };
 
 // === 英文翻译字典 ===
@@ -307,6 +317,11 @@ const en: Record<string, string> = {
   deleteConfirm: "Are you sure?",
   deleteAgentTitle: "Delete Agent",
   deleteAgentDesc: "Are you sure you want to delete this agent? This action cannot be undone.",
+  agentResting: "Resting",
+  agentEnabled: "Agent enabled",
+  agentDisabled: "Agent resting",
+  agentSetRest: "Set resting",
+  agentSetActive: "Enable agent",
   deleteModelTitle: "Delete Model",
   deleteModelDesc: "Are you sure you want to delete this custom model? This action cannot be undone.",
   deleteFailed: "Delete failed",
@@ -450,6 +465,11 @@ const en: Record<string, string> = {
   errorBoundaryTitle: "Something went wrong",
   errorBoundaryMessage: "Sorry, the page encountered an error. Please refresh to try again.",
   errorBoundaryReload: "Refresh Page",
+  voiceInput: "Voice Input",
+  voiceRecording: "Recording...",
+  voiceRecognizing: "Recognizing...",
+  voiceError: "Voice recognition failed",
+  voiceNotSupported: "Browser does not support audio recording",
 };
 
 /** 国际化状态接口 */

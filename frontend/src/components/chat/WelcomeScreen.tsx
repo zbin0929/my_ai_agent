@@ -181,6 +181,7 @@ export function WelcomeScreen({ onMenuClick }: { onMenuClick?: () => void }) {
             hasInput={hasInput}
             onAttachClick={() => fileInputRef.current?.click()}
             onSend={() => startChat(input)}
+            onVoiceResult={(text) => setInput(input ? input + " " + text : text)}
           />
         </div>
         <div className="flex flex-wrap gap-2 mt-6 justify-center">

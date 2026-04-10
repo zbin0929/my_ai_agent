@@ -16,3 +16,5 @@ sse-starlette>=2.0.0
 python-multipart>=0.0.18
 slowapi>=0.1.9
 filelock>=3.12.0
+fpdf2>=2.8.0
+python-pptx>=1.0.0

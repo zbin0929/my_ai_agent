@@ -206,14 +206,34 @@ async def _stream_normal_chat(agent_config, clean_input: str, original_input: st
                     func_args = {}
 
                 yield json.dumps({"type": "tool_start", "tool_name": func_name}, ensure_ascii=False) + "\n"
-                tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
-                result_msg = tool_result.get("message", "")
-                _t, _c = _parse_thinking(result_msg)
-                if _t and enable_thinking:
-                    yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
-                if _c:
-                    yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
-                    full_response_parts.append(_c)
+                upload_dir = os.path.join(project_root, "data", "uploads")
+                resolved_files = []
+                for f in (files or []):
+                    if os.path.isabs(f):
+                        resolved_files.append(f)
+                    else:
+                        resolved_files.append(os.path.join(upload_dir, f))
+
+                import inspect as _inspect
+                from skills import get_skill_by_tool_name as _get_skill_by_tool
+                _skill = _get_skill_by_tool(func_name)
+                if _skill and _skill.get("handler") and _inspect.isasyncgenfunction(_skill["handler"]):
+                    _handler = _skill["handler"]
+                    _user_input = func_args.get("prompt") or func_args.get("text") or func_args.get("url") or str(func_args)
+                    _ctx = {"tool_args": func_args, "files": resolved_files, "file_paths": resolved_files, "agent_config": agent_config, "enable_thinking": enable_thinking}
+                    async for _chunk in _handler(_user_input, _ctx):
+                        if _chunk:
+                            yield json.dumps({"type": "content", "content": _chunk}, ensure_ascii=False) + "\n"
+                            full_response_parts.append(_chunk)
+                else:
+                    tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args, resolved_files)
+                    result_msg = tool_result.get("message", "")
+                    _t, _c = _parse_thinking(result_msg)
+                    if _t and enable_thinking:
+                        yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
+                    if _c:
+                        yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
+                        full_response_parts.append(_c)
 
         full_response = "".join(full_response_parts)
         full_thinking = "".join(full_thinking_parts)

@@ -1,16 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-文档总结技能
-============
-
-对上传的文档进行结构化总结、关键信息提取、要点归纳。
-支持 PDF、Word、Excel、CSV、TXT、代码文件等。
-"""
-
 import os
 import sys
+import json
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, AsyncGenerator
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
@@ -19,36 +12,30 @@ from skills import register_skill
 
 logger = logging.getLogger(__name__)
 
-
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB 限制
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 
 def _read_file_content(filepath: str) -> str:
-    """读取文件内容，复用 core.file_reader"""
     if os.path.getsize(filepath) > MAX_FILE_SIZE:
         logger.warning(f"文件过大跳过: {filepath} ({os.path.getsize(filepath)} bytes)")
         return ""
     try:
-        from core.file_reader import read_file_content
-        return read_file_content(filepath)
-    except ImportError:
-        # fallback：直接读取文本文件
-        try:
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-                return f.read()
-        except Exception:
-            return ""
+        from core.file_reader import read_file
+        result = read_file(filepath)
+        if result.get("success"):
+            return result["content"]
+        return ""
+    except Exception:
+        return ""
 
 
 def _find_uploaded_files(context: Dict[str, Any]) -> list:
-    """从上下文中查找上传的文件路径"""
     files = []
     upload_dir = os.path.join(project_root, "data", "uploads")
     if context:
         for key in ("files", "file_paths"):
             if context.get(key):
                 for f in context[key]:
-                    # 如果是文件 ID（不是完整路径），转换为完整路径
                     if not os.path.isabs(f):
                         full_path = os.path.join(upload_dir, f)
                         if os.path.exists(full_path):
@@ -84,7 +71,6 @@ SUMMARY_MODES = {
 
 
 def _detect_mode(text: str) -> str:
-    """检测用户期望的总结模式"""
     for keyword, mode in SUMMARY_MODES.items():
         if keyword in text:
             return mode
@@ -92,7 +78,6 @@ def _detect_mode(text: str) -> str:
 
 
 def _build_prompt(mode: str, filename: str = "") -> str:
-    """根据模式构建 system prompt"""
     base = f"你是专业的文档分析助手。以下是文档内容"
     if filename:
         base += f"（文件名: {filename}）"
@@ -126,7 +111,6 @@ def _build_prompt(mode: str, filename: str = "") -> str:
 
 
 def summarize_document(content: str, mode: str = "summary", filename: str = "", question: str = "") -> Dict[str, Any]:
-    """调用 LLM 总结文档"""
     if not content or len(content.strip()) < 10:
         return {"success": False, "message": "文档内容为空或过短，无法总结"}
 
@@ -140,8 +124,7 @@ def summarize_document(content: str, mode: str = "summary", filename: str = "", 
 
         system_prompt = _build_prompt(mode, filename)
 
-        # 限制内容长度避免超出上下文窗口
-        max_content = 15000
+        max_content = 50000
         truncated = len(content) > max_content
         doc_content = content[:max_content]
 
@@ -160,6 +143,51 @@ def summarize_document(content: str, mode: str = "summary", filename: str = "", 
     except Exception as e:
         logger.error(f"文档总结失败: {e}")
         return {"success": False, "message": f"文档总结失败: {e}"}
+
+
+async def stream_summarize_document(content: str, mode: str = "summary", filename: str = "", question: str = "",
+                                     enable_thinking: bool = False) -> AsyncGenerator[str, None]:
+    if not content or len(content.strip()) < 10:
+        yield "文档内容为空或过短，无法总结"
+        return
+
+    try:
+        from core.agents import get_agent_manager
+        from core.model_router import build_llm_for_agent, resolve_provider_credentials, resolve_model_id
+        from core.llm_stream import stream_llm_real
+        from api.deps import DATA_DIR
+
+        manager = get_agent_manager(DATA_DIR)
+        agent_config = manager.get_default_agent()
+
+        system_prompt = _build_prompt(mode, filename)
+
+        max_content = 50000
+        truncated = len(content) > max_content
+        doc_content = content[:max_content]
+
+        user_msg = f"文档内容：\n---\n{doc_content}\n---"
+        if truncated:
+            user_msg += f"\n\n（文档过长，已截取前 {max_content} 字符，总长度 {len(content)} 字符）"
+        if question:
+            user_msg += f"\n\n用户的具体问题：{question}"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg},
+        ]
+
+        async for chunk in stream_llm_real(messages, agent_config, enable_thinking=enable_thinking):
+            chunk_type = chunk.get("type", "")
+            chunk_content = chunk.get("content", "")
+            if chunk_type == "content" and chunk_content:
+                yield chunk_content
+            elif chunk_type == "thinking" and enable_thinking and chunk_content:
+                yield chunk_content
+
+    except Exception as e:
+        logger.error(f"流式文档总结失败: {e}")
+        yield f"\n\n文档总结失败: {e}"
 
 
 @register_skill(
@@ -198,17 +226,14 @@ def summarize_document(content: str, mode: str = "summary", filename: str = "", 
         },
     },
 )
-def handle_doc_summary(user_input: str, context: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_doc_summary(user_input: str, context: Dict[str, Any]) -> AsyncGenerator[str, None]:
     tool_args = context.get("tool_args", {}) if context else {}
     mode = tool_args.get("mode") or _detect_mode(user_input)
 
-    # 查找上传的文件
     files = _find_uploaded_files(context)
     if not files:
-        return {
-            "success": False,
-            "message": "请先上传文档，然后再要求总结。支持 PDF、Word、Excel、CSV、TXT、代码文件等。",
-        }
+        yield "请先上传文档，然后再要求总结。支持 PDF、Word、Excel、CSV、TXT、代码文件等。"
+        return
 
     all_content = []
     filenames = []
@@ -221,26 +246,23 @@ def handle_doc_summary(user_input: str, context: Dict[str, Any]) -> Dict[str, An
                 filenames.append(fname)
 
     if not all_content:
-        return {"success": False, "message": "无法读取上传的文件内容，请确认文件格式受支持"}
+        yield "无法读取上传的文件内容，请确认文件格式受支持"
+        return
 
     combined = "\n\n".join(all_content)
     fname_str = "、".join(filenames)
 
-    # 清理用户输入获取具体问题
     question = user_input
     for trigger in ["总结文档", "文档总结", "帮我总结", "归纳一下", "提取要点",
                      "文档分析", "分析文档", "总结一下", "帮我归纳", "摘要",
                      "帮我", "一下", "这份", "这个", "文档", "文件"]:
         question = question.replace(trigger, "").strip()
 
-    result = summarize_document(combined, mode=mode, filename=fname_str, question=question)
-
-    if not result["success"]:
-        return {"success": False, "message": f"❌ {result['message']}"}
-
     mode_label = {"summary": "总结", "keypoints": "要点提取", "extract": "信息提取", "analysis": "深度分析"}.get(mode, "总结")
-    msg = (
-        f"📄 **文档{mode_label}** — {fname_str}\n\n"
-        f"{result['summary']}"
-    )
-    return {"success": True, "message": msg}
+    header = f"📄 **文档{mode_label}** — {fname_str}\n\n"
+    yield header
+
+    enable_thinking = context.get("enable_thinking", False) if context else False
+
+    async for chunk in stream_summarize_document(combined, mode=mode, filename=fname_str, question=question, enable_thinking=enable_thinking):
+        yield chunk

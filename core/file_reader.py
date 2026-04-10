@@ -6,7 +6,7 @@ from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
-MAX_CONTENT_CHARS = 30000
+MAX_CONTENT_CHARS = 80000
 
 SUPPORTED_EXTENSIONS = {
     ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log",

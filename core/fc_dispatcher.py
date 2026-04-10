@@ -236,20 +236,31 @@ async def stream_with_fc(
                 else:
                     yield json.dumps({"type": "tool_start", "tool_name": func_name}, ensure_ascii=False) + "\n"
                     from skills import get_skill_by_tool_name
+                    import inspect as _inspect
                     skill = get_skill_by_tool_name(func_name)
                     if skill and skill.get("handler"):
                         user_input_for_skill = func_args.get("prompt") or func_args.get("text") or func_args.get("url") or str(func_args)
-                        context_for_skill = {"files": files, "agent_config": agent_config, "tool_args": func_args}
-                        tool_result = await asyncio.to_thread(skill["handler"], user_input_for_skill, context_for_skill)
+                        if _inspect.isasyncgenfunction(skill["handler"]):
+                            context_for_skill = {"files": files, "agent_config": agent_config, "tool_args": func_args, "enable_thinking": enable_thinking}
+                            content = ""
+                            async for _chunk in skill["handler"](user_input_for_skill, context_for_skill):
+                                if _chunk:
+                                    yield json.dumps({"type": "content", "content": _chunk}, ensure_ascii=False) + "\n"
+                                    content += _chunk
+                            tool_result = None
+                        else:
+                            context_for_skill = {"files": files, "agent_config": agent_config, "tool_args": func_args}
+                            tool_result = await asyncio.to_thread(skill["handler"], user_input_for_skill, context_for_skill)
                     else:
-                        tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
-                    result_msg = tool_result.get("message", "")
-                    thinking, content = _parse_thinking(result_msg)
-                    if thinking and enable_thinking:
-                        yield json.dumps({"type": "thinking", "content": thinking}, ensure_ascii=False) + "\n"
-                    if content:
-                        yield json.dumps({"type": "content", "content": content}, ensure_ascii=False) + "\n"
-                    full_response += content
+                        tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args, files)
+                    if tool_result is not None:
+                        result_msg = tool_result.get("message", "")
+                        thinking, content = _parse_thinking(result_msg)
+                        if thinking and enable_thinking:
+                            yield json.dumps({"type": "thinking", "content": thinking}, ensure_ascii=False) + "\n"
+                        if content:
+                            yield json.dumps({"type": "content", "content": content}, ensure_ascii=False) + "\n"
+                            full_response += content
 
         ai_meta = {}
         if full_thinking:

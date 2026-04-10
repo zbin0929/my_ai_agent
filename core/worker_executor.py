@@ -176,14 +176,25 @@ async def stream_worker_content(worker_agent, task_input: str, enable_thinking: 
                     func_args = {}
 
                 yield json.dumps({"type": "tool_start", "tool_name": func_name}, ensure_ascii=False) + "\n"
-                tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args)
-                result_msg = tool_result.get("message", "")
-                _t, _c = _parse_thinking(result_msg)
-                if _t and enable_thinking:
-                    yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
-                if _c:
-                    yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
-                    response_parts.append(_c)
+                import inspect as _inspect
+                from skills import get_skill_by_tool_name as _get_skill_by_tool
+                _skill = _get_skill_by_tool(func_name)
+                if _skill and _skill.get("handler") and _inspect.isasyncgenfunction(_skill["handler"]):
+                    _user_input = func_args.get("prompt") or func_args.get("text") or func_args.get("url") or str(func_args)
+                    _ctx = {"tool_args": func_args, "files": files, "file_paths": files, "enable_thinking": enable_thinking}
+                    async for _chunk in _skill["handler"](_user_input, _ctx):
+                        if _chunk:
+                            yield json.dumps({"type": "content", "content": _chunk}, ensure_ascii=False) + "\n"
+                            response_parts.append(_chunk)
+                else:
+                    tool_result = await asyncio.to_thread(execute_tool_by_name, func_name, func_args, files)
+                    result_msg = tool_result.get("message", "")
+                    _t, _c = _parse_thinking(result_msg)
+                    if _t and enable_thinking:
+                        yield json.dumps({"type": "thinking", "content": _t}, ensure_ascii=False) + "\n"
+                    if _c:
+                        yield json.dumps({"type": "content", "content": _c}, ensure_ascii=False) + "\n"
+                        response_parts.append(_c)
 
         full_response = "".join(response_parts)
         full_thinking = "".join(thinking_parts)

@@ -43,6 +43,7 @@ class AgentConfig:
     is_default: bool = False
     skills: Optional[List[str]] = None
     agent_type: Optional[str] = None
+    enabled: bool = True
 
     def get_agent_type(self) -> str:
         """自动推导 Agent 类型：
@@ -143,17 +144,21 @@ class AgentManager:
         return list(agents.values())
 
     def list_workers(self) -> List[AgentConfig]:
-        """获取所有非默认的员工 Agent 列表"""
-        return [a for a in self.list_agents() if not a.is_default]
+        """获取所有非默认的已启用员工 Agent 列表"""
+        return [a for a in self.list_agents() if not a.is_default and a.enabled]
 
     def get_agent_by_name(self, name: str) -> Optional[AgentConfig]:
-        """根据名称模糊匹配 Agent（支持 @提及）"""
+        """根据名称模糊匹配 Agent（支持 @提及），跳过已休息的 Agent"""
         agents = self.load()
         name_lower = name.lower().strip()
         for agent in agents.values():
+            if not agent.is_default and not agent.enabled:
+                continue
             if agent.name.lower() == name_lower:
                 return agent
         for agent in agents.values():
+            if not agent.is_default and not agent.enabled:
+                continue
             if name_lower in agent.name.lower():
                 return agent
         return None

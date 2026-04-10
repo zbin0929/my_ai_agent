@@ -177,6 +177,41 @@ async def download_file(file_id: str):
     return FileResponse(fp, filename=file_id)
 
 
+@router.post("/stt")
+@limiter.limit("20/minute")
+async def speech_to_text(request: Request, file: UploadFile = File(...)):
+    """语音转文字 — 接收前端录制的音频文件，使用 Whisper API 转为文字"""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename")
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in {".webm", ".wav", ".mp3", ".ogg", ".m4a", ".flac"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported audio type: {ext}")
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Audio file too large (max 20MB)")
+
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    try:
+        tmp.write(content)
+        tmp.close()
+
+        from skills.media_understand import _transcribe_with_api, _transcribe_local
+        result = _transcribe_with_api(tmp.name)
+        if not result.get("success"):
+            result = _transcribe_local(tmp.name)
+        if not result.get("success"):
+            raise HTTPException(status_code=500, detail=result.get("message", "语音识别失败"))
+        return {"success": True, "text": result["text"]}
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+
 # TTS 音频输出目录
 TTS_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "tts_output")
 
@@ -227,6 +262,35 @@ async def download_generated_image(filename: str):
     
     media_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif"}
     return FileResponse(fp, filename=filename, media_type=media_types.get(ext, "image/png"))
+
+
+# 文档生成输出目录
+DOCS_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "generated_docs")
+
+
+@router.get("/docs/{filename}")
+async def download_generated_doc(filename: str):
+    """下载AI生成的文档文件（PDF/Word/PPT）— 含路径遍历防护"""
+    filename = _sanitize_filename(filename)
+    if not filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in {".pdf", ".docx", ".pptx"}:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+
+    fp = os.path.join(DOCS_OUTPUT_DIR, filename)
+    if not _is_safe_path(DOCS_OUTPUT_DIR, fp):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(fp) or not os.path.isfile(fp):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_types = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+    return FileResponse(fp, filename=filename, media_type=media_types.get(ext, "application/octet-stream"))
 
 
 # 文本类扩展名集合（用于文件内容读取接口）

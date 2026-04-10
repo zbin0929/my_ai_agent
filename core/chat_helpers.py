@@ -101,9 +101,15 @@ def _build_file_content_sync(files: List[str], user_input: str, upload_dir: str)
             continue
         file_id = sanitize_file_id(f)
         try:
-            with open(f, "r", encoding="utf-8", errors="ignore") as fh:
-                content = fh.read(5000)
+            from core.file_reader import read_file
+            result = read_file(f)
+            if result.get("success"):
+                content = result["content"]
+                if len(content) > 30000:
+                    content = content[:30000] + "\n... [内容已截断]"
                 file_parts.append(f"[文件 {file_id}]:\n{content}")
+            else:
+                file_parts.append(f"[文件 {file_id}]: ({result.get('message', '无法读取')})")
         except Exception:
             file_parts.append(f"[文件 {file_id}]: (无法读取)")
     file_text = "\n\n".join(file_parts)

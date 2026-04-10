@@ -422,6 +422,7 @@ export function InputBar() {
           onAttachClick={() => fileInputRef.current?.click()}
           onSend={handleSend}
           onStop={handleStop}
+          onVoiceResult={(text) => handleInputChange(input ? input + " " + text : text)}
         />
       </div>
 

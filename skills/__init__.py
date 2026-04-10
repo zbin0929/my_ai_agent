@@ -42,6 +42,8 @@ _SYNONYM_MAP: Dict[str, List[str]] = {
     "代码": ["编程", "写代码", "运行代码", "执行代码", "code", "python"],
     "搜索": ["搜一下", "查一下", "查找", "search", "联网搜索", "帮我搜"],
     "知识库": ["knowledge", "知识问答", "文档问答", "RAG"],
+    "生成文档": ["导出文档", "生成PDF", "导出PDF", "生成Word", "导出Word", "生成PPT", "导出PPT",
+                "转为文档", "制作文档", "制作PPT", "下载文档", "下载报告", "生成报告", "导出报告"],
 }
 
 # 构建反向索引：同义词 → 规范词
@@ -214,17 +216,17 @@ def _rebuild_tool_name_index():
                 _TOOL_NAME_INDEX[func_name] = skill_id
 
 
-def execute_tool_by_name(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+def execute_tool_by_name(tool_name: str, arguments: Dict[str, Any], files: list = None) -> Dict[str, Any]:
     """通过工具名称执行对应的技能
     
     参数:
         tool_name: 工具名称(如"generate_image")
         arguments: 工具参数(如{"prompt": "一只猫"})
+        files: 上传文件路径列表
     
     返回:
         技能执行结果字典
     """
-    # O(1) 查找
     skill_id = _TOOL_NAME_INDEX.get(tool_name)
     if skill_id:
         skill = _SKILL_REGISTRY.get(skill_id)
@@ -234,6 +236,9 @@ def execute_tool_by_name(tool_name: str, arguments: Dict[str, Any]) -> Dict[str,
                 try:
                     user_input = arguments.get("prompt") or arguments.get("text") or arguments.get("url") or str(arguments)
                     context = {"tool_args": arguments, "skill_id": skill_id}
+                    if files:
+                        context["files"] = files
+                        context["file_paths"] = files
                     return handler(user_input, context)
                 except Exception as e:
                     return {"success": False, "message": f"工具执行失败: {str(e)}"}
@@ -339,6 +344,10 @@ def load_builtin_skills():
         "skills.email_send",
         "skills.task_manager",
         "skills.media_understand",
+        "skills.doc_generator",
+        "skills.script_generator",
+        "skills.storyboard_creator",
+        "skills.prompt_optimizer",
     ]
     for module_name in skill_modules:
         try:

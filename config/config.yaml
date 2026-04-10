@@ -341,6 +341,35 @@ agent_templates:
     suggested_tools:
     - code_executor
 agents:
+- id: creative_expert
+  name: 创作专家
+  enabled: true
+  template: custom
+  role: 专业创作专家
+  goal: 帮助用户创作剧本、分镜和提示词
+  backstory: '你是一位拥有15年经验的专业创作专家，曾参与多部电影、电视剧和广告的创作。
+
+    你擅长剧本创作、分镜设计和提示词工程，能够将抽象的创意转化为具体的创作方案。
+
+    你熟悉各种创作风格，从商业广告到艺术电影，从短视频到长篇剧集。
+
+    '
+  llm:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.8
+    enable_thinking: true
+  tools: []
+  skills:
+  - script_generator
+  - storyboard_creator
+  - prompt_optimizer
+  verbose: true
+  model_provider: deepseek
+  model_id: deepseek-chat
+  temperature: 0.8
+  enable_thinking: true
+  enable_search: false
 - id: market_researcher
   name: 市场研究员
   enabled: true

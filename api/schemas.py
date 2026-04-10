@@ -48,6 +48,7 @@ class AgentCreate(BaseModel):
     description: Optional[str] = ""
     skills: Optional[List[str]] = None
     agent_type: Optional[str] = None
+    enabled: Optional[bool] = True
 
 
 class AgentUpdate(BaseModel):
@@ -65,6 +66,7 @@ class AgentUpdate(BaseModel):
     custom_base_url: Optional[str] = None
     description: Optional[str] = None
     agent_type: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 class ModelCreate(BaseModel):

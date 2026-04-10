@@ -66,6 +66,17 @@ export function AgentManager() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
+  const toggleEnabled = async (agent: Agent) => {
+    const newEnabled = !agent.enabled;
+    try {
+      const updated = await api.agents.update(agent.id, { enabled: newEnabled });
+      setAgents(agents.map((a) => (a.id === agent.id ? { ...a, enabled: newEnabled } : a)));
+      toast.success(newEnabled ? t("agentEnabled") : t("agentDisabled"));
+    } catch {
+      toast.error(t("operationFailed"));
+    }
+  };
+
   useEffect(() => {
     api.agents.availableSkills().then((data) => {
       setAvailableSkills((data.skills || []).map((s: Record<string, unknown>) => ({
@@ -199,7 +210,7 @@ export function AgentManager() {
 
       <div className="space-y-3">
         {agents.map((agent) => (
-          <div key={agent.id} className="border border-[var(--border)] rounded-xl p-4 hover:border-[var(--accent)]/30 transition-colors">
+          <div key={agent.id} className={`border rounded-xl p-4 transition-colors ${agent.enabled !== false ? "border-[var(--border)] hover:border-[var(--accent)]/30" : "border-[var(--border)] opacity-50 bg-[var(--bg-hover)]/30"}`}>
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-2">
@@ -210,13 +221,27 @@ export function AgentManager() {
                       {t("defaultAgent")}
                     </span>
                   )}
+                  {!agent.is_default && agent.enabled === false && (
+                    <span className="text-xs bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 px-2 py-0.5 rounded-full">
+                      {t("agentResting")}
+                    </span>
+                  )}
                 </div>
                 <div className="text-sm text-[var(--text-2)] mt-0.5">
                   {agent.role && <span className="mr-2">{agent.role}</span>}
                   <span className="text-[var(--text-3)]">{agent.model_id}</span>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
+                {!agent.is_default && (
+                  <button
+                    onClick={() => toggleEnabled(agent)}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${agent.enabled !== false ? "bg-[var(--accent)]" : "bg-gray-300 dark:bg-gray-600"}`}
+                    title={agent.enabled !== false ? t("agentSetRest") : t("agentSetActive")}
+                  >
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${agent.enabled !== false ? "left-5" : "left-0.5"}`} />
+                  </button>
+                )}
                 <button onClick={() => startEdit(agent)} className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--bg-hover)] transition-colors">{t("edit")}</button>
                 {!agent.is_default && (
                   <button onClick={() => setDeleteConfirm(agent.id)} className="px-3 py-1.5 text-sm border border-[var(--red)]/30 text-[var(--red)] rounded-lg hover:bg-red-50 transition-colors">{t("delete")}</button>

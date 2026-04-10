@@ -215,6 +215,29 @@ export const api = {
     }
     return res.json();
   },
+  /** 语音转文字 — 上传音频文件，返回识别的文本 */
+  speechToText: async (audioBlob: Blob): Promise<string> => {
+    const formData = new FormData();
+    const ext = audioBlob.type.includes("webm") ? "webm" : "wav";
+    formData.append("file", audioBlob, `recording.${ext}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    try {
+      const res = await fetch(`${API_BASE}/files/stt`, { method: "POST", body: formData, signal: controller.signal });
+      if (!res.ok) {
+        let detail = "语音识别失败";
+        try {
+          const errData = await res.json();
+          detail = errData.detail || detail;
+        } catch {}
+        throw new Error(detail);
+      }
+      const data = await res.json();
+      return data.text || "";
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  },
 };
 
 const configApi = {

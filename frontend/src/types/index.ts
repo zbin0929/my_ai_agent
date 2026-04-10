@@ -55,6 +55,7 @@ export interface Agent {
   custom_api_key?: string;       // 自定义 API Key（覆盖全局配置）
   custom_base_url?: string;      // 自定义 API Base URL
   is_default: boolean;           // 是否为默认 Agent（不可删除）
+  enabled?: boolean;             // 是否启用（false = 休息中，主管不分配任务）
   capabilities?: string[];       // 模型能力标签（从后端动态获取）
   skills?: string[];             // 绑定的技能 ID 列表（如 ["image_gen", "tts"]）
 }
