@@ -117,7 +117,7 @@ my_ai_agent/
 ### 1. Clone the Project
 
 ```bash
-git clone https://github.com/zxs-0312/my_ai_agent.git
+git clone https://github.com/zbin0929/my_ai_agent.git
 cd my_ai_agent
 ```
 
@@ -306,10 +306,10 @@ This project is open-sourced under the [MIT License](LICENSE).
 
 ## 👤 Author
 
-**zxs-0312**
+**zbin0929**
 
-- GitHub: [@zxs-0312](https://github.com/zxs-0312)
-- Project Homepage: [https://github.com/zxs-0312/my_ai_agent](https://github.com/zxs-0312/my_ai_agent)
+- GitHub: [@zbin0929](https://github.com/zbin0929)
+- Project Homepage: [https://github.com/zbin0929/my_ai_agent](https://github.com/zbin0929/my_ai_agent)
 
 ---
 

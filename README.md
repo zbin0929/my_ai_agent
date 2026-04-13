@@ -117,7 +117,7 @@ my_ai_agent/
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/zxs-0312/my_ai_agent.git
+git clone https://github.com/zbin0929/my_ai_agent.git
 cd my_ai_agent
 ```
 
@@ -306,10 +306,10 @@ pytest tests/ --cov=core --cov-report=html
 
 ## 👤 作者
 
-**zxs-0312**
+**zbin0929**
 
-- GitHub: [@zxs-0312](https://github.com/zxs-0312)
-- 项目主页: [https://github.com/zxs-0312/my_ai_agent](https://github.com/zxs-0312/my_ai_agent)
+- GitHub: [@zbin0929](https://github.com/zbin0929)
+- 项目主页: [https://github.com/zbin0929/my_ai_agent](https://github.com/zbin0929/my_ai_agent)
 
 ---
 
