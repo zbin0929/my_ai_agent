@@ -286,19 +286,50 @@ pytest tests/ --cov=core --cov-report=html
 
 > Web 界面截图将在这里展示
 
-## 🤝 贡献指南
+## 🤝 加入社区，一起建设
 
-我们欢迎所有形式的贡献！
+**我们热切期待你的加入！** 无论你的技术水平如何，都可以为项目贡献力量。这是一个开放、友好的社区，欢迎各种形式的参与。
 
-1. Fork 本仓库
-2. 创建你的特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交你的改动 (`git commit -m 'Add some amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 打开 Pull Request
+### 🌟 你可以这样参与
 
-### 贡献者
+| 参与方式 | 适合人群 | 如何开始 |
+|---------|---------|---------|
+| 🐛 **报告 Bug** | 所有用户 | 发现问题时 [提交 Issue](https://github.com/zbin0929/my_ai_agent/issues) |
+| 💡 **提出需求** | 所有用户 | 有新想法？[告诉我们](https://github.com/zbin0929/my_ai_agent/issues/new?template=feature_request.md) |
+| 📝 **完善文档** | 技术写作者 | 改进 README、添加教程、翻译内容 |
+| 🔧 **贡献代码** | 开发者 | Fork → 开发 → 提交 Pull Request |
+| 🧪 **测试反馈** | 测试人员 | 试用新功能，反馈使用体验 |
+| 🌍 **翻译国际化** | 多语言者 | 帮助翻译成更多语言 |
+| 💬 **帮助答疑** | 资深用户 | 在 Issues 中帮助其他用户 |
+| ⭐ **推广项目** | 所有人 | 给项目 Star，分享给朋友 |
 
-感谢所有为项目做出贡献的开发者！
+### 🚀 快速开始贡献
+
+1. **Fork 本仓库** 到你的 GitHub 账号
+2. **创建特性分支** `git checkout -b feature/amazing-feature`
+3. **提交你的改动** `git commit -m 'Add some amazing feature'`
+4. **推送到分支** `git push origin feature/amazing-feature`
+5. **打开 Pull Request**，我们会尽快审核
+
+### 📋 贡献规范
+
+- 代码风格遵循 [PEP 8](https://pep8.org/)
+- 提交前请运行测试 `pytest tests/`
+- 新增功能请添加相应的测试用例
+- 文档更新与代码同步
+
+### 💬 交流渠道
+
+- 💻 [GitHub Issues](https://github.com/zbin0929/my_ai_agent/issues) - 问题反馈与讨论
+- 📧 发送邮件至作者：通过 GitHub 个人主页联系
+
+### 🙏 贡献者
+
+感谢所有为项目做出贡献的开发者！你们的每一份努力都让这个项目变得更好。
+
+<a href="https://github.com/zbin0929/my_ai_agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=zbin0929/my_ai_agent" alt="Contributors" />
+</a>
 
 ## 📄 开源协议
 

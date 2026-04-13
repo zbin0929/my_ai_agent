@@ -286,19 +286,50 @@ pytest tests/ --cov=core --cov-report=html
 
 > Web interface screenshots will be displayed here
 
-## 🤝 Contributing
+## 🤝 Join the Community, Build Together
 
-We welcome all forms of contributions!
+**We warmly welcome you to join!** Regardless of your technical level, you can contribute to this project. This is an open and friendly community that welcomes all forms of participation.
 
-1. Fork this repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+### 🌟 Ways to Participate
 
-### Contributors
+| Participation | For Whom | How to Start |
+|--------------|----------|--------------|
+| 🐛 **Report Bugs** | All users | [Submit an Issue](https://github.com/zbin0929/my_ai_agent/issues) when you find problems |
+| 💡 **Suggest Features** | All users | Have new ideas? [Tell us](https://github.com/zbin0929/my_ai_agent/issues/new?template=feature_request.md) |
+| 📝 **Improve Docs** | Tech writers | Improve README, add tutorials, translate content |
+| 🔧 **Contribute Code** | Developers | Fork → Develop → Submit Pull Request |
+| 🧪 **Test & Feedback** | Testers | Try new features, share your experience |
+| 🌍 **Translations** | Multilingual users | Help translate to more languages |
+| 💬 **Help Others** | Experienced users | Help other users in Issues |
+| ⭐ **Spread the Word** | Everyone | Star the project, share with friends |
 
-Thanks to all developers who have contributed to this project!
+### 🚀 Quick Start Contributing
+
+1. **Fork this repository** to your GitHub account
+2. **Create a feature branch** `git checkout -b feature/amazing-feature`
+3. **Commit your changes** `git commit -m 'Add some amazing feature'`
+4. **Push to the branch** `git push origin feature/amazing-feature`
+5. **Open a Pull Request** - we'll review it soon
+
+### 📋 Contribution Guidelines
+
+- Follow [PEP 8](https://pep8.org/) code style
+- Run tests before submitting: `pytest tests/`
+- Add corresponding test cases for new features
+- Keep documentation updated with code changes
+
+### 💬 Communication Channels
+
+- 💻 [GitHub Issues](https://github.com/zbin0929/my_ai_agent/issues) - Bug reports and discussions
+- 📧 Email the author: Contact via GitHub profile
+
+### 🙏 Contributors
+
+Thanks to all developers who have contributed to this project! Every effort makes this project better.
+
+<a href="https://github.com/zbin0929/my_ai_agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=zbin0929/my_ai_agent" alt="Contributors" />
+</a>
 
 ## 📄 License
 
